@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="..\BuildingBlocks\Contracts\KaguERP.BuildingBlocks.Contracts.csproj" />
+    <ProjectReference Include="..\Erp.Bootstrap\KaguERP.Bootstrap.csproj" />
+  </ItemGroup>
+</Project>
+

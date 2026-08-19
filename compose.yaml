@@ -1,0 +1,94 @@
+name: kagu-erp-local
+
+services:
+  erp-db:
+    image: postgres:18.4-trixie
+    init: true
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${KAGU_ERP_POSTGRES_DB:?Set KAGU_ERP_POSTGRES_DB in .env}
+      POSTGRES_USER: ${KAGU_ERP_POSTGRES_USER:?Set KAGU_ERP_POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${KAGU_ERP_POSTGRES_PASSWORD:?Set KAGU_ERP_POSTGRES_PASSWORD in .env}
+      KAGU_ERP_MIGRATOR_PASSWORD: ${KAGU_ERP_MIGRATOR_PASSWORD:?Set KAGU_ERP_MIGRATOR_PASSWORD in .env}
+      KAGU_ERP_APP_PASSWORD: ${KAGU_ERP_APP_PASSWORD:?Set KAGU_ERP_APP_PASSWORD in .env}
+      PGDATA: /var/lib/postgresql/18/docker
+    ports:
+      - 127.0.0.1:55432:5432
+    volumes:
+      - erp-postgres-data:/var/lib/postgresql
+      - ./deploy/docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks:
+      - private
+
+  keycloak-db:
+    image: postgres:18.4-trixie
+    init: true
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${KEYCLOAK_POSTGRES_DB:?Set KEYCLOAK_POSTGRES_DB in .env}
+      POSTGRES_USER: ${KEYCLOAK_POSTGRES_USER:?Set KEYCLOAK_POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD:?Set KEYCLOAK_POSTGRES_PASSWORD in .env}
+      PGDATA: /var/lib/postgresql/18/docker
+    volumes:
+      - keycloak-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks:
+      - private
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.0
+    init: true
+    restart: unless-stopped
+    command:
+      - start-dev
+      - --hostname=http://localhost:58080
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/${KEYCLOAK_POSTGRES_DB:?Set KEYCLOAK_POSTGRES_DB in .env}
+      KC_DB_USERNAME: ${KEYCLOAK_POSTGRES_USER:?Set KEYCLOAK_POSTGRES_USER in .env}
+      KC_DB_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD:?Set KEYCLOAK_POSTGRES_PASSWORD in .env}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:?Set KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME in .env}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:?Set KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD in .env}
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_HTTP_MANAGEMENT_HEALTH_ENABLED: "true"
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:58080:8080
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          { printf 'HEAD /health/ready HTTP/1.0\r\n\r\n' >&0;
+          grep 'HTTP/1.0 200'; } 0<>/dev/tcp/localhost/9000
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks:
+      - private
+
+networks:
+  private:
+    internal: true
+
+volumes:
+  erp-postgres-data:
+  keycloak-postgres-data:

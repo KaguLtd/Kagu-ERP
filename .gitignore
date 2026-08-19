@@ -1,0 +1,67 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+secrets/
+
+# Build and test artifacts
+artifacts/
+TestResults/
+coverage/
+*.trx
+*.coverage
+*.coveragexml
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+
+# Node, pnpm and web
+node_modules/
+.pnpm-store/
+.turbo/
+dist/
+.vite/
+*.tsbuildinfo
+playwright-report/
+test-results/
+blob-report/
+
+# Android and Gradle
+.gradle/
+local.properties
+**/build/
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# IDE and operating system
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local databases, containers and backup drills
+.local-data/
+.compose-data/
+.restore-lab/
+*.dump
+*.backup
+*.wal
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.bak
+~$*

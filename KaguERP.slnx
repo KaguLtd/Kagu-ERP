@@ -1,0 +1,35 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/BuildingBlocks/" />
+  <Folder Name="/src/BuildingBlocks/Application/">
+    <Project Path="src/BuildingBlocks/Application/KaguERP.BuildingBlocks.Application.csproj" />
+  </Folder>
+  <Folder Name="/src/BuildingBlocks/Contracts/">
+    <Project Path="src/BuildingBlocks/Contracts/KaguERP.BuildingBlocks.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/src/BuildingBlocks/Domain/">
+    <Project Path="src/BuildingBlocks/Domain/KaguERP.BuildingBlocks.Domain.csproj" />
+  </Folder>
+  <Folder Name="/src/BuildingBlocks/Infrastructure/">
+    <Project Path="src/BuildingBlocks/Infrastructure/KaguERP.BuildingBlocks.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/Erp.Api/">
+    <Project Path="src/Erp.Api/KaguERP.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/Erp.Bootstrap/">
+    <Project Path="src/Erp.Bootstrap/KaguERP.Bootstrap.csproj" />
+  </Folder>
+  <Folder Name="/src/Erp.Migrator/">
+    <Project Path="src/Erp.Migrator/KaguERP.Migrator.csproj" />
+  </Folder>
+  <Folder Name="/src/Erp.Worker/">
+    <Project Path="src/Erp.Worker/KaguERP.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/Architecture/">
+    <Project Path="tests/Architecture/KaguERP.ArchitectureChecks.csproj" />
+  </Folder>
+  <Folder Name="/tests/Integration/">
+    <Project Path="tests/Integration/KaguERP.DatabaseIntegrationChecks.csproj" />
+  </Folder>
+</Solution>
