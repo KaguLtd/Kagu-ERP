@@ -20,7 +20,7 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 ## Bağlam
 
 - `Kagu ERP` klasörü 2026-08-19 tarihinde bağımsız Git repository olarak `main` dalıyla başlatıldı.
-- GitHub remote: `https://github.com/KaguLtd/Kagu-ERP.git`; erişilebilir ve başlangıçta boştur.
+- GitHub remote: `https://github.com/KaguLtd/Kagu-ERP.git`; `main` dalı ilk bootstrap commit'i `71c8faf` ile yayımlanmıştır.
 - Repository'de v1.2 şartname paketi, yaşayan görev/karar kayıtları ve ilk .NET modüler monolit iskeleti vardır.
 - Yerel doğrulamada Git 2.54.0, .NET SDK 10.0.204, Node.js 24.15.0 ve pnpm 11.19.0 kullanılabilir bulundu. Java ve Docker bulunamadı.
 
@@ -84,7 +84,7 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 | 8 | Auth/scope/audit örneği | Authenticated örnek istek, permission/company scope ve audit correlation | pending |
 | 9 | Health/telemetry/outbox | Readiness, structured log/trace ve duplicate-safe outbox iskeleti | pending |
 | 10 | Local restore smoke | Backup, ayrı hedefe restore, auth/scope ve DB smoke | pending |
-| 11 | CI ve temiz kurulum | Belgelenmiş bootstrap/verify ile clean checkout kapısı | in-progress — workflow hazır, ilk remote run bekliyor |
+| 11 | CI ve temiz kurulum | Belgelenmiş bootstrap/verify ile clean checkout kapısı | in-progress — ilk remote run `32229247173` tamamlandı; web ve secret scan geçti, backend/DB/Android altyapı hataları açık |
 
 ## Test planı
 
@@ -104,7 +104,7 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 | Tarih | Risk/karar | Etki | Karar/sahip |
 |---|---|---|---|
 | 2026-08-19 | Repository başlangıçta üst Git kökünün altındaydı | Kardeş proje kapsam riski | `DEC-MP01-018` ile bağımsız repo oluşturuldu |
-| 2026-08-19 | GitHub remote boş | Geçmiş/branch conflict yok; ilk commit henüz yayımlanmadı | Kullanıcı remote'u sağladı; push ayrıca yapılacak |
+| 2026-08-19 | GitHub remote başlangıçta boştu | Geçmiş/branch conflict olmadan `main` başlatılabildi | `71c8faf` ilk bootstrap commit'i olarak pushlandı; CI run `32229247173` oluşturuldu |
 | 2026-08-19 | İsimli teknik/güvenlik/ops sahipleri yok | MP-02 çıkış kabulü tamamlanamaz | MP-01 içinde atanacak |
 | 2026-08-19 | Yerel Node.js 24.15.0 ve pnpm 11.19.0, hedef 24.19.0 ve 11.22.0'ın gerisinde | Temiz kurulum hedef sürümleri ayrıca indirmeli | Hedefler resmi sürüm kaynaklarıyla sabitlendi; mevcut sürümler uyumluluk aralığında |
 | 2026-08-19 | Java, Android SDK ve Docker yerelde bulunamadı | Android ve Compose runtime milestone'ları şu anda doğrulanamaz | Kullanıcı JDK 17, Android Studio/SDK ve Docker Desktop kurulumunu başlattı; tanımlar bu sırada hazırlanıyor |
@@ -112,7 +112,9 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 | 2026-08-19 | TypeScript 7.0.2, typescript-eslint 8.67.0 peer aralığının dışında | Lint tip bilgisi güvenilir değil | Resmi 6.0 bakım sürümü olan TypeScript 6.0.3'e sabitlendi; `pnpm peers check` temiz |
 | 2026-08-19 | İlk web runtime bağımlılıkları eklendi | Lisans, bakım ve bundle yüzeyi | React, TanStack Query, React Hook Form, React Router ve Zod güncel kararlı tam sürümlere kataloglandı; doğrudan runtime paketlerinin tamamı MIT |
 | 2026-08-19 | CI üçüncü taraf action çalıştırır | Tag hareketiyle supply-chain riski | Checkout/setup/Gradle/Gitleaks action referansları resmi major tag'lerin tam commit SHA'larına sabitlendi; Dependabot review PR'ı açar, otomatik merge yok |
-| 2026-08-19 | Gitleaks action organizasyon/private repo koşulu ilk remote run'da doğrulanmadı | Secret scan job lisans nedeniyle bloklanabilir | İlk GitHub Actions koşusu kapı kanıtıdır; başarısızsa CLI/container alternatifi ayrı kararla seçilecek |
+| 2026-08-19 | Gitleaks action organizasyon/private repo koşulu ilk remote run'da doğrulanmadı | Secret scan job lisans nedeniyle bloklanabilir | İlk remote run'da secret scan geçti; action bu private repository'de çalışıyor |
+| 2026-08-19 | İlk remote CI backend, DB ve Android işlerinde başarısız oldu | Clean-checkout/CI kapısı kapanamaz | Linux path normalizasyonu, Compose host portu ve `sdkmanager` kurulumu ayrı düzeltme işidir; web ve secret scan geçti |
+| 2026-08-19 | CI tarafından üretilen ephemeral local parolalar job logundaki environment bloğunda maskelenmedi | Private logda kısa ömürlü sentetik credential görünürlüğü | Değerler yalnız sonlandırılmış runner/local DB içindi; sonraki DB CI koşusundan önce `add-mask` veya secret-safe aktarım zorunlu |
 | 2026-08-19 | Production veri konumu/RPO-RTO kararı açık | Uzak backup ve dış telemetry kapsam dışı | Yalnız local sentetik smoke |
 | 2026-08-19 | Migration/runtime aynı DB kimliğiyle çalışırsa RLS ve DDL sınırı zayıflar | Tenant sızıntısı veya schema değiştirme riski | Login olmayan `kagu_erp_schema_owner`, NOINHERIT migrator ve owner/superuser/BYPASSRLS olmayan runtime rolleri ayrıldı |
 | 2026-08-19 | Yeni PostgreSQL istemci bağımlılığı gerekir | Lisans, bakım ve supply-chain yüzeyi | Resmi NuGet'teki güncel kararlı Npgsql 10.0.3 merkezi pinlendi; paket PostgreSQL lisanslıdır |
@@ -123,7 +125,10 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 
 - Bağımsız Git repository `main` dalıyla başlatıldı.
 - `origin` remote'u `https://github.com/KaguLtd/Kagu-ERP.git` olarak eklendi.
-- Remote erişimi ve boş başlangıç durumu doğrulandı.
+- Remote erişimi ve boş başlangıç durumu doğrulandı; `main` dalı `71c8faf` ile `origin` üzerine ilk kez pushlandı.
+- Yerel `scripts/verify.ps1` kapısı .NET build/architecture ve web lint/typecheck/test/build için geçti; Android JDK/SDK eksikliği açık kapı olarak kaldı.
+- İlk GitHub Actions `ci` çalışması `32229247173` tamamlandı: web ve secret scan geçti; backend mimari kontrolü Linux'ta Windows ayraçlı proje yollarını normalize edemedi, DB işi `127.0.0.1:55432` bağlantısını kuramadı ve Android işinde `sdkmanager` bulunamadı.
+- CI'nin rastgele ürettiği local/ephemeral parolaların log environment bloğunda maskelenmediği kaydedildi. Bunlar sonlandırılmış runner ve sentetik DB dışında geçerli değildir; workflow düzeltilmeden yeni DB CI koşusu çalıştırılmamalıdır.
 - Root hijyeni, line-ending/format kuralları, secret ve build çıktısı ignore kapsamı oluşturuldu.
 - .NET 10 için `global.json`, merkezi build/package yönetimi; Node.js 24.19.0 ve pnpm 11.22.0 hedefleri sabitlendi.
 - Yerel Git 2.54.0, .NET SDK 10.0.204, Node.js 24.15.0 ve pnpm 11.19.0 doğrulandı; Java ve Docker bulunamadı.
@@ -142,7 +147,7 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 - Full `scripts/verify.ps1` tekrar geçti: .NET build sıfır warning/error, architecture check başarılı, web lint/typecheck ve 2 test başarılı, production bundle üretildi; Android eksik toolchain warning'i açık kaldı.
 - GitHub Actions için salt-okunur izinli ve iptal edilebilir dört job oluşturuldu: backend, web, Android ve secret scan. Action referansları tam commit SHA'larına pinlendi; credential persistence kapatıldı.
 - Dependabot; GitHub Actions, npm/pnpm, Gradle ve NuGet için haftalık ve insan incelemeli güncelleme PR'ları açacak şekilde yapılandırıldı.
-- CI henüz remote'a push edilmediği için GitHub-hosted Android ve Gitleaks sonuçları kanıtlanmış sayılmadı.
+- GitHub-hosted Gitleaks işi ilk remote koşuda geçti; Android işi `sdkmanager` bulunamadığı için lint/unit aşamasına ulaşamadı.
 - Local geliştirme için `postgres:18.4-trixie` tabanlı ayrı ERP/Keycloak veritabanları ve `quay.io/keycloak/keycloak:26.7.0` tanımlandı. ERP DB ve Keycloak yalnız loopback'e yayımlanır; Keycloak DB host'a yayımlanmaz.
 - Compose verileri ayrı named volume'larda tutulur; PostgreSQL 18'in sürüme özel `PGDATA` yolu kullanılır. Local servisler yalnız internal Compose ağıyla haberleşir.
 - `.env.example` yalnız açık sentetik placeholder taşır. Windows ve POSIX bootstrap betikleri mevcut `.env` dosyasını korur, yoksa rastgele local parolalar üretir; repository'ye production secret eklenmez.
@@ -152,7 +157,7 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 - İlk expand migration'ı `org.tenant` ve `org.company` tablolarını UUID, version, UTC timestamp, aktör ve aktiflik kolonlarıyla kurdu. Runtime rolünde SELECT/INSERT/UPDATE vardır, DELETE yoktur; iki tabloda `ENABLE/FORCE ROW LEVEL SECURITY` ve `WITH CHECK` politikaları bulunur.
 - Gerçek ve sıfırdan oluşturulmuş PostgreSQL 18 cluster'ında migration ilk çalışmada 1, ikinci çalışmada 0 migration uyguladı. Runtime rolünün superuser/BYPASSRLS/table-owner olmadığı doğrulandı.
 - Aynı gerçek DB koşusunda yetkili tenant/company okuma-yazma başarılı; çapraz tenant okuma-yazma, aynı tenant içindeki yetkisiz company okuma ve DELETE reddedildi. `SET LOCAL` context'inin pooled bağlantıya sızmadığı doğrulandı; sentetik kayıtlar test sonunda kaldırıldı ve geçici cluster durdurulup silindi.
-- CI'a PostgreSQL migration/RLS job'u eklendi. Ephemeral parolalar workflow sırasında rastgele üretilir; job henüz remote üzerinde koşmadığı için CI kanıtı bekler.
+- CI'a PostgreSQL migration/RLS job'u eklendi. İlk remote koşu container health sonrasında `127.0.0.1:55432` bağlantısını kuramadı; ayrıca ephemeral parolaların logda maskelenmesi gerekir.
 - PowerShell bootstrap/verify/test betikleri dış komut exit code'larında fail-fast olacak şekilde sertleştirildi; NuGet erişim hatası artık yanlış başarı sonucu üretemez.
 - `RestorePackagesWithLockFile` etkinleştirildi ve 10 .NET proje lock dosyası üretildi. `dotnet restore KaguERP.slnx --locked-mode` geçti; bootstrap, verify ve DB test betikleri locked restore kullanır.
 - Son full `scripts/verify.ps1` koşusu geçti: locked restore, .NET Release build (0 warning/0 error), 8 source proje architecture kontrolü, format, web lint/typecheck, 2 component testi ve production build başarılı. Android JDK/SDK eksikliği açık warning olarak kaldı.
@@ -173,6 +178,6 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 - [ ] Authenticated scoped örnek ve audit.
 - [ ] Health/telemetry/outbox temeli.
 - [ ] Local restore smoke.
-- [ ] CI ve temiz kurulum kanıtı — workflow hazır, ilk remote run bekliyor.
+- [ ] CI ve temiz kurulum kanıtı — ilk remote run `32229247173` başarısız; backend path portability, DB port erişimi, Android SDK kurulumu ve ephemeral secret masking açık.
 - [ ] Güvenlik/secret/PII incelemesi.
 - [ ] MP-02 çıkış kapısı değerlendirmesi.
