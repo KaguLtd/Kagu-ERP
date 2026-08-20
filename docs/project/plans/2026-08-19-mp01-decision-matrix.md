@@ -23,9 +23,9 @@ Planın çıktıları MP-02 repository bootstrap planının güvenli varsayım s
 
 ## Bağlam
 
-Repository şu anda 57 Markdown dosyasından oluşan v1.2 şartname paketidir; kaynak kod, migration, test ve görev planı henüz yoktur. Tasarım ilkeleri kabul edilmiştir, fakat gerçek firma yapısı, rol sahipleri, muhasebe politikaları, veri konumu ve resmi onayların çoğu açık durumdadır.
+Repository; v1.2 şartname paketi ile birlikte .NET backend, strict web, Android/Compose, PostgreSQL migration/RLS, Keycloak auth, audit/outbox, restore testleri ve CI içeren MP-02 teknik platformunu taşır. Commit `2f4d4ee` için GitHub Actions run `32360372748` içindeki altı job'ın tamamı geçmiştir. Gerçek firma yapısı, rol sahipleri, muhasebe politikaları, veri konumu ve resmi onayların çoğu açık durumdadır.
 
-Git çalışma kökü proje klasörünün bir üstündeki `KAGUgit` klasörüdür ve henüz commit yoktur. Kardeş klasörler aynı untracked çalışma ağacında görünmektedir. MP-02 bootstrap başlamadan proje repository sınırı ayrıca netleştirilmelidir.
+Git çalışma kökü `Kagu ERP` klasörüdür; bağımsız repository `main` dalı ve `https://github.com/KaguLtd/Kagu-ERP.git` origin'i kullanır. Repository sınırı `DEC-MP01-018` ile çözülmüştür.
 
 ## Kapsam
 
@@ -81,7 +81,7 @@ Blokaj etkisi karar bazında ayrıca yazılır:
 | 4 | İsimli sahip ataması | Ürün, teknik, muhasebe, güvenlik/veri ve operasyon sorumluları kayıtlıdır | pending |
 | 5 | Firma topolojisi ve temel politikalar | Tenant/company/branch/period/currency/approval kararları kanıtlıdır | pending |
 | 6 | Finansal çekirdek politikaları | Hesap planı, allocation, kur/yuvarlama, kilit ve kontrol hesabı kararları onaylıdır | pending |
-| 7 | MP-02 ve MP-03 DoR değerlendirmesi | Her eksik madde owner/date ve açık blokajla raporlanır | pending |
+| 7 | MP-02 ve MP-03 DoR değerlendirmesi | Her eksik madde owner/date ve açık blokajla raporlanır | in-progress — MP-02 teknik pass; kurumsal sahip kabulü ve MP-03 finansal kararları bekliyor |
 
 ## Test planı
 
@@ -112,6 +112,13 @@ Blokaj etkisi karar bazında ayrıca yazılır:
 - `Kagu ERP` klasörü bağımsız Git repository olarak `main` dalıyla başlatıldı ve `origin` olarak `https://github.com/KaguLtd/Kagu-ERP.git` bağlandı.
 - Remote'un erişilebilir ve boş olduğu `git ls-remote` ile doğrulandı; commit veya push yapılmadı.
 - Sıradaki kesin adım: MP-02 repository-bootstrap görev planını oluşturmak; isimli sahip ve firma politikası toplama işi MP-01 içinde paralel devam edecek.
+
+### 2026-08-20
+
+- MP-02 teknik platformu yerel doğrulama ve GitHub Actions run `32360372748` ile geçti; clean bootstrap, backend/format, web, Android, secret scan ve PostgreSQL migration/RLS/restore job'larının 6/6'sı başarılıdır.
+- MP-02 kurumsal kapanışı, isimli teknik/güvenlik/operasyon sahipleri ve `DEC-MP01-017` production RPO/RTO kabulü olmadan tamamlanmış sayılmadı.
+- MP-03 Definition of Ready sonucu değişmedi: `DEC-MP01-001`–`010`, `012` ve ilgili isimli sahipler onaylanmadan gerçek accounting-kernel davranışı blokludur.
+- Sıradaki kesin adım: beş sorumlu rol için isim ataması ve karar başına hedef tarih kaydıdır.
 
 ## Tamamlanma kanıtı
 

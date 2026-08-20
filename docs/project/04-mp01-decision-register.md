@@ -81,7 +81,7 @@ notes: "Yerel repository 2026-08-19 tarihinde main dalıyla başlatıldı; commi
 
 ### MP-02 — Repository ve geliştirme platformu
 
-**Sonuç: conditional.** Aşağıdaki geri döndürülebilir işler firma kararları beklerken yapılabilir:
+**Sonuç: technical-pass / organizational acceptance pending.** Aşağıdaki geri döndürülebilir işler firma kararları beklerken tamamlandı:
 
 - bağımsız repository sınırı onaylandıktan sonra solution/klasör iskeleti;
 - SDK/package version pinleme, format/lint/analyzers ve temel CI;
@@ -90,7 +90,7 @@ notes: "Yerel repository 2026-08-19 tarihinde main dalıyla başlatıldı; commi
 - tenant/company/RLS spike; bunun nihai firma topolojisi olmadığı açıkça belirtilir;
 - local backup/restore smoke.
 
-Repository sınırı `DEC-MP01-018` ile çözülmüştür. MP-02 repository-bootstrap görev planı hazırlanabilir. Dış servis, uzak backup veya gerçek veri için ilgili diğer kararlar yine gereklidir.
+Repository sınırı `DEC-MP01-018` ile çözülmüştür. MP-02 teknik kapıları commit `2f4d4ee` için GitHub Actions run `32360372748` dahil yerel ve remote kanıtlarla geçmiştir. Fazın kurumsal kabulü için isimli teknik/güvenlik/operasyon sahipleri ile `DEC-MP01-017` production hedefleri hâlâ gereklidir. Dış servis, uzak backup veya gerçek veri için ilgili diğer kararlar yine gereklidir.
 
 ### MP-03 — Muhasebe çekirdeği ve cari ilk dikey dilim
 
