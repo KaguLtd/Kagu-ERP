@@ -125,6 +125,8 @@ Bu süre sistem alarmı ve runbook SLA'sıdır; otomatik dış bildirim değildi
 
 ## 11. Tatbikat takvimi
 
+MP-02 local smoke, `scripts/test-restore.ps1`/`.sh` ile kaynak Compose DB'sinden custom-format dump alıp yalnız rastgele ve doğrulanmış `kagu_erp_restore_*` adlı ayrı DB'ye restore eder. Restore hedefinde migration, DB role/RLS/IAM/audit/outbox ve desteklenen ortamda Keycloak auth scope testleri çalışır; kaynak DB/volume değiştirilmez. Geçici DB ve dump doğrulanmış hedef adıyla her durumda temizlenir. Bu küçük sentetik smoke aşağıdaki production hacim/PITR/blob/Keycloak tatbikatlarının yerine geçmez.
+
 - Aylık: rastgele DB backup'ını izole ortamda açma ve otomatik mali smoke.
 - Üç aylık: tam DB + blob + Keycloak restore; RPO/RTO ölçümü.
 - Altı aylık: host kaybı/ransomware tabletop ve temiz host kurulumu.

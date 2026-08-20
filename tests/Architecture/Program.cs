@@ -1,4 +1,20 @@
 using System.Xml.Linq;
+using KaguERP.DatabaseIntegrationChecks;
+
+if (args is ["database"])
+{
+    return await DatabaseIntegrationCheck.RunAsync();
+}
+
+if (args is ["seed-auth-smoke"])
+{
+    return await AuthSmokeFixture.SeedAsync();
+}
+
+if (args is ["cleanup-auth-smoke"])
+{
+    return await AuthSmokeFixture.CleanupAsync();
+}
 
 var repositoryRoot = FindRepositoryRoot(new DirectoryInfo(AppContext.BaseDirectory));
 var sourceRoot = Path.Combine(repositoryRoot.FullName, "src");
@@ -46,6 +62,7 @@ foreach (var project in projects.Values)
 
 if (failures.Count == 0)
 {
+    await ApiContractCheck.RunAsync();
     Console.WriteLine($"Architecture checks passed for {projects.Count} source projects.");
     return 0;
 }
@@ -66,7 +83,7 @@ ProjectInfo ReadProject(string projectPath)
         .Descendants("ProjectReference")
         .Select(element => element.Attribute("Include")?.Value)
         .Where(value => !string.IsNullOrWhiteSpace(value))
-        .Select(value => Path.GetFullPath(Path.Combine(Path.GetDirectoryName(projectPath)!, value!)))
+        .Select(value => NormalizeProjectReferencePath(projectPath, value!))
         .ToArray();
 
     return new ProjectInfo(
@@ -74,6 +91,15 @@ ProjectInfo ReadProject(string projectPath)
         GetLayer(Path.GetFileNameWithoutExtension(projectPath)),
         GetModuleName(relativePath),
         references);
+}
+
+static string NormalizeProjectReferencePath(string projectPath, string referencePath)
+{
+    var platformPath = referencePath
+        .Replace('\\', Path.DirectorySeparatorChar)
+        .Replace('/', Path.DirectorySeparatorChar);
+
+    return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(projectPath)!, platformPath));
 }
 
 static DirectoryInfo FindRepositoryRoot(DirectoryInfo start)

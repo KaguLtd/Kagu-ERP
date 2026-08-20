@@ -22,6 +22,7 @@ if [[ ! -f .env ]]; then
   erp_app_password="$(new_local_secret)"
   keycloak_db_password="$(new_local_secret)"
   keycloak_admin_password="$(new_local_secret)"
+  keycloak_smoke_password="$(new_local_secret)"
 
   umask 077
   env_template="$(<.env.example)"
@@ -30,6 +31,7 @@ if [[ ! -f .env ]]; then
   env_template="${env_template/CHANGEME_LOCAL_ONLY_ERP_APP/$erp_app_password}"
   env_template="${env_template/CHANGEME_LOCAL_ONLY_KEYCLOAK_DB/$keycloak_db_password}"
   env_template="${env_template/CHANGEME_LOCAL_ONLY_KEYCLOAK_ADMIN/$keycloak_admin_password}"
+  env_template="${env_template/CHANGEME_LOCAL_ONLY_KEYCLOAK_SMOKE/$keycloak_smoke_password}"
   printf '%s\n' "$env_template" > .env
   printf '%s\n' 'Generated ignored .env with random local-only credentials.'
 else
@@ -46,10 +48,13 @@ else
   if ! grep -q '^KAGU_ERP_APP_PASSWORD=' .env; then
     missing_values="${missing_values}\nKAGU_ERP_APP_PASSWORD=$(new_local_secret)"
   fi
+  if ! grep -q '^KAGU_KEYCLOAK_SMOKE_PASSWORD=' .env; then
+    missing_values="${missing_values}\nKAGU_KEYCLOAK_SMOKE_PASSWORD=$(new_local_secret)"
+  fi
 
   if [[ -n "$missing_values" ]]; then
     printf '%b\n' "$missing_values" >> .env
-    printf '%s\n' 'Existing .env values preserved; missing local database identities were added.'
+    printf '%s\n' 'Existing .env values preserved; missing local development settings were added.'
   else
     printf '%s\n' 'Existing .env preserved.'
   fi
@@ -58,7 +63,9 @@ fi
 dotnet restore KaguERP.slnx --locked-mode
 pnpm install --frozen-lockfile
 
-if command -v docker >/dev/null 2>&1; then
+if [[ "${KAGU_ERP_SKIP_SERVICES:-0}" == "1" ]]; then
+  printf '%s\n' 'Service bootstrap skipped by request; dependency installation completed.'
+elif command -v docker >/dev/null 2>&1; then
   docker compose config --quiet
   docker compose up --detach --wait
   ./scripts/test-db.sh

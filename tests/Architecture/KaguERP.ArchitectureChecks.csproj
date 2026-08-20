@@ -2,5 +2,19 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
   </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
+    <ProjectReference Include="..\..\src\Erp.Api\KaguERP.Api.csproj" />
+    <ProjectReference Include="..\..\src\Erp.Bootstrap\KaguERP.Bootstrap.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Integration\AuthSmokeFixture.cs" Link="Database\AuthSmokeFixture.cs" />
+    <Compile Include="..\Integration\DatabaseIntegrationCheck.cs" Link="Database\DatabaseIntegrationCheck.cs" />
+  </ItemGroup>
 </Project>
-

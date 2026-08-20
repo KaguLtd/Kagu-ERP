@@ -2,13 +2,16 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
 android {
     namespace = "com.kagultd.erp"
-    compileSdk = 36
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 0
+        }
+    }
 
     defaultConfig {
         applicationId = "com.kagultd.erp"
@@ -46,6 +49,18 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
+
+        managedDevices {
+            localDevices {
+                create("pixel2Api29") {
+                    device = "Pixel 2"
+                    apiLevel = 29
+                    systemImageSource = "aosp"
+                    require64Bit = true
+                    testedAbi = "x86_64"
+                }
+            }
+        }
     }
 
     packaging {

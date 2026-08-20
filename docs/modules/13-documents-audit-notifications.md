@@ -43,6 +43,8 @@ Yükleme akışı:
 
 Parola, access/refresh token, secret, tam banka kartı veya gereksiz kişisel veri audit'e yazılmaz. Audit kaydı uygulama yöneticisi tarafından değiştirilemez; ayrı yazma rolü ve salt ekleme yetkisi kullanılır.
 
+MP-02 platform diliminde authorization audit için `platform.audit_event` oluşturulmuştur. Runtime uygulama rolü bu tabloya yalnız RLS kapsamlı `INSERT` yapabilir; `SELECT`, `UPDATE` ve `DELETE` alamaz. İlk endpoint correlation/trace, trusted tenant/actor/company kapsamı, eylem, hedef, sonuç ve PII içermeyen reason code yazar; audit insert başarısızsa izin verilen işlem başarılı sayılmaz. Ayrı login audit-writer rolüne geçiş, production secret/topology kararıyla birlikte tamamlanacaktır.
+
 ## 5. Bildirim modeli
 
 İşlem, aynı veritabanı transaction'ında `notification_intent`/outbox kaydı üretir. Worker; uygulama içi, e-posta, push veya ileride SMS kanalına teslim eder.

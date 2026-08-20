@@ -1,0 +1,69 @@
+{
+  "realm": "kagu-local-test",
+  "displayName": "Kagu ERP Local Authentication Test",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "verifyEmail": false,
+  "rememberMe": false,
+  "loginWithEmailAllowed": false,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": true,
+  "clients": [
+    {
+      "clientId": "kagu-erp-api",
+      "name": "Kagu ERP API",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "kagu-erp-local-smoke",
+      "name": "Kagu ERP local authentication smoke",
+      "description": "Local development only; never deploy this direct-grant client to production.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "kagu-erp-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "kagu-erp-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "kagu-local-smoke",
+      "firstName": "Kagu",
+      "lastName": "Local Smoke",
+      "email": "kagu-local-smoke@invalid.local",
+      "enabled": true,
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KAGU_KEYCLOAK_SMOKE_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

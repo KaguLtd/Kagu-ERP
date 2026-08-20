@@ -1,3 +1,7 @@
+param(
+    [switch] $SkipServices
+)
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -21,6 +25,22 @@ function New-LocalSecret {
     return ([Convert]::ToBase64String($bytes)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 }
 
+function Enable-DockerCommand {
+    $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
+    if ($null -ne $dockerCommand) {
+        return $true
+    }
+
+    $perUserDockerBin = Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\resources\bin'
+    $perUserDocker = Join-Path $perUserDockerBin 'docker.exe'
+    if (Test-Path -LiteralPath $perUserDocker) {
+        $env:PATH = "$perUserDockerBin;$env:PATH"
+        return $true
+    }
+
+    return $false
+}
+
 Require-Command git
 Require-Command dotnet
 Require-Command node
@@ -32,6 +52,7 @@ if (-not (Test-Path -LiteralPath '.env')) {
     $erpAppPassword = New-LocalSecret
     $keycloakDbPassword = New-LocalSecret
     $keycloakAdminPassword = New-LocalSecret
+    $keycloakSmokePassword = New-LocalSecret
 
     $environmentFile = @"
 # Generated for local development by scripts/bootstrap.ps1. Never commit this file.
@@ -49,6 +70,7 @@ KEYCLOAK_POSTGRES_PASSWORD=$keycloakDbPassword
 
 KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME=kagu-local-admin
 KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD=$keycloakAdminPassword
+KAGU_KEYCLOAK_SMOKE_PASSWORD=$keycloakSmokePassword
 "@
 
     Set-Content -LiteralPath '.env' -Value $environmentFile -Encoding utf8NoBOM
@@ -73,9 +95,13 @@ KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD=$keycloakAdminPassword
         $missingValues.Add("KAGU_ERP_APP_PASSWORD=$(New-LocalSecret)")
     }
 
+    if ($existingEnvironment -notmatch '(?m)^KAGU_KEYCLOAK_SMOKE_PASSWORD=') {
+        $missingValues.Add("KAGU_KEYCLOAK_SMOKE_PASSWORD=$(New-LocalSecret)")
+    }
+
     if ($missingValues.Count -gt 0) {
         Add-Content -LiteralPath '.env' -Value ("`n" + ($missingValues -join "`n")) -Encoding utf8NoBOM
-        Write-Output 'Existing .env values preserved; missing local database identities were added.'
+        Write-Output 'Existing .env values preserved; missing local development settings were added.'
     } else {
         Write-Output 'Existing .env preserved.'
     }
@@ -91,8 +117,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "pnpm install failed with exit code $LASTEXITCODE."
 }
 
-$dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
-if ($null -eq $dockerCommand) {
+if ($SkipServices) {
+    Write-Output 'Service bootstrap skipped by request; dependency installation completed.'
+} elseif (-not (Enable-DockerCommand)) {
     Write-Warning 'Docker is unavailable; local PostgreSQL and Keycloak were not started.'
 } else {
     docker compose config --quiet

@@ -6,14 +6,14 @@ Bu klasör, KKTC'de orta ölçekli bir işletme için geliştirilecek web ve And
 
 ## Uygulama durumu ve yerel doğrulama
 
-MP-02 repository bootstrap başlamıştır. Bağımsız repository `main` dalını ve `https://github.com/KaguLtd/Kagu-ERP.git` remote'unu kullanır. İlk backend solution, katman referans kontrolleri, strict React/TypeScript web workspace, Android/Compose proje iskeleti ve local PostgreSQL/Keycloak Compose tanımı mevcuttur. Android build ve Compose çalışma zamanı kurulacak JDK/Android SDK/Docker ile doğrulanacaktır; auth/RLS ve restore milestone'ları henüz tamamlanmamıştır.
+MP-02 repository bootstrap başlamıştır. Bağımsız repository `main` dalını ve `https://github.com/KaguLtd/Kagu-ERP.git` remote'unu kullanır. Backend solution, katman referans kontrolleri, strict React/TypeScript web workspace, Android/Compose proje iskeleti ve çalışan local PostgreSQL/Keycloak Compose ortamı mevcuttur. JDK 17, Android Studio/SDK, Gradle wrapper, Android lint/unit/instrumentation derleme ve API 29 managed-emulator Compose semantics testi doğrulanmış; local restore ve servis açmadan temiz bootstrap kapıları geçmiştir. Düzeltilen CI sözleşmesi için yeni remote koşu beklenmektedir.
 
 Hedef toolchain:
 
 - .NET 10 LTS; `global.json` aynı major içindeki güncel feature band'ine roll-forward eder.
 - Node.js 24 LTS; `.node-version` güncel güvenlik yamalı sürümü gösterir.
 - pnpm sürümü root `package.json` içinde sabitlenir.
-- Java/Android SDK ve Docker, ilgili MP-02 milestone'unda ayrıca doğrulanır.
+- JDK 17, Android Studio/SDK, WSL2 ve Docker Desktop yerelde doğrulanmıştır. Android `compileSdk` 37.0, `targetSdk` 36 ve `minSdk` 29'dur.
 
 Tüm mevcut yerel kapıları çalıştırmak için:
 
@@ -26,6 +26,17 @@ Linux/macOS/CI için:
 ```bash
 ./scripts/verify.sh
 ```
+
+Günlük root doğrulaması Android lint, JVM unit testleri ve instrumentation APK derlemesini çalıştırır. Compose instrumentation testini API 29 x86_64 Gradle managed device üzerinde gerçekten yürütmek için:
+
+```powershell
+cd apps/android
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+$env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
+./gradlew.bat :app:pixel2Api29DebugAndroidTest --no-daemon
+```
+
+İlk koşu lisansı önceden kabul edilmiş Android API 29 sistem imajını indirebilir. Görev emülatörü oluşturur, testi çalıştırır ve sonucu `apps/android/app/build/reports/androidTests/managedDevice/` altında üretir.
 
 İlk yerel kurulum ve bağımlılık geri yükleme için:
 
@@ -41,9 +52,15 @@ Linux/macOS/CI eşdeğeri:
 
 Bootstrap, mevcut `.env` değerlerini değiştirmez; yeni zorunlu anahtar eksikse onu ekler. Dosya yoksa Git tarafından yok sayılan `.env` içine kriptografik rastgele ve yalnız yerelde kullanılacak parolalar üretir. Docker varsa PostgreSQL 18 ve Keycloak'ı da başlatıp health kapılarını bekler. Local servisler:
 
+Windows per-user Docker Desktop kurulumu mevcut terminalin PATH'ine eklenmemiş olsa bile PowerShell bootstrap/verify betikleri standart kurulum konumunu otomatik bulur.
+
+Yalnız temiz bağımlılık kurulumunu sınamak veya servisleri ayrıca yöneteceğiniz bir ortamda bootstrap çalıştırmak için Windows'ta `./scripts/bootstrap.ps1 -SkipServices`, POSIX ortamında `KAGU_ERP_SKIP_SERVICES=1 ./scripts/bootstrap.sh` kullanılır. Bu seçenek PostgreSQL/Keycloak başlatmaz ve DB kapısını geçmiş saymaz.
+
 - ERP PostgreSQL: `127.0.0.1:55432` — yalnız API/backend erişimi içindir; web ve Android doğrudan bağlanmaz.
 - Keycloak: `http://localhost:58080` — `start-dev` yalnız yerel geliştirme içindir.
-- Keycloak PostgreSQL: yalnız private Compose ağı; host portu yoktur.
+- Keycloak PostgreSQL: yalnız Compose bridge ağı; host portu yoktur. Host'a açılan ERP DB ve Keycloak portları yalnız `127.0.0.1` adresine bind edilir.
+
+Local Compose, `kagu-local-test` realm'ini ve yalnız otomatik issuer/audience smoke testi için kullanılan `kagu-erp-local-smoke` public client'ını import eder. Direct password grant yalnız bu sentetik local kullanıcıya açıktır; web/mobil/production kimlik akışı değildir. Parola Git tarafından yok sayılan `.env` içinde rastgele üretilir ve test çıktısına yazılmaz.
 
 `.env.example` içindeki değerler açıkça güvensiz placeholder'lardır. Local Compose veya üretilen `.env` production dağıtım tanımı ya da production secret kaynağı değildir.
 
@@ -59,7 +76,27 @@ PostgreSQL migration ve tenant/company RLS integration kontrollerini ayrıca ça
 
 Bu komut migration CLI'sini iki kez çalıştırarak checksum/idempotency davranışını, ardından gerçek PostgreSQL üzerinde runtime rol ayrımı ve RLS negatif senaryolarını doğrular. `KaguERP.Migrator` uygulama başlangıcından ayrıdır; connection string komut satırı argümanı olarak kabul edilmez ve yalnız environment üzerinden verilir. Runtime rolü schema/table owner, superuser veya `BYPASSRLS` değildir.
 
-`pnpm verify`; web lint, strict typecheck, component testleri ve production build kapılarını çalıştırır. Vite geliştirme sunucusu `/health` isteklerini yerel API'nin `http://127.0.0.1:5099` adresine yönlendirir. Root doğrulama scripti JDK 17 ve Android SDK mevcutsa Android lint/unit testlerini de çalıştırır; eksikse bunu geçen test olarak değil açık MP-02 kapısı olarak raporlar.
+Local Keycloak issuer/audience doğrulamasını ayrıca çalıştırmak için:
+
+```powershell
+./scripts/test-auth.ps1
+```
+
+Betik doğru issuer/audience tokenındaki `iss`/`sub` kimliğini ERP DB'deki aktif kullanıcı, tenant, şirket ve `profile.read` iznine çözüp `/api/v1/me/scopes` için `200`; audience'sız token için `401 AUTHENTICATION_REQUIRED` bekler. İzin kararı correlation/trace kapsamıyla append-only `platform.audit_event` kaydı üretmeden başarılı yanıt dönmez. Sentetik fixture'ı ve audit kaydını test sonunda temizler, başlattığı geçici API sürecini kapatır ve token/parolayı yazdırmaz. Production API açılışında `Authentication__Authority` ve `Authentication__Audience` zorunludur; metadata HTTPS varsayılan olarak zorunludur ve yalnız local development ayarında kapatılır.
+
+İzole local PostgreSQL restore provasını ayrıca çalıştırmak için:
+
+```powershell
+./scripts/test-restore.ps1
+```
+
+```bash
+./scripts/test-restore.sh
+```
+
+Betik kaynak DB veya volume'u değiştirmez. `pg_dump` çıktısını yalnız `kagu_erp_restore_<rastgele>` adlı ayrı geçici DB'ye yükler; restore hedefinde migration/idempotency, RLS/IAM/audit/outbox ve PowerShell akışında gerçek Keycloak auth smoke çalıştırır. Yalnız doğrulanmış geçici DB/dump hedefleri `finally`/trap cleanup ile kaldırılır. Bu local sentetik prova production pgBackRest/PITR, blob/Keycloak restore veya RPO/RTO kabulü değildir.
+
+`pnpm verify`; web lint, strict typecheck, component testleri ve production build kapılarını çalıştırır. Vite geliştirme sunucusu `/health` isteklerini yerel API'nin `http://127.0.0.1:5099` adresine yönlendirir. `/health/live` yalnız proses canlılığını, `/health/ready` ise PostgreSQL erişilebilirliğini bildirir ve bağımlılık yoksa `503` döner. API/Worker stdout logları JSON'dır; request telemetry ham URL/ID yerine route template, status, süre ve correlation taşır. `/api/v1` istekleri Keycloak JWT ve deny-by-default application-scope filtrelerinden geçer; istemci `X-Tenant-Id` veya `X-Company-Id` header'ıyla kapsam belirleyemez. API, doğrulanmış tokenın `iss`/`sub` değerlerini RLS korumalı IAM tablolarındaki aktif üyelik ve şirket bazlı permission kayıtlarına çözer; DB connection ayarı yoksa resolver güvenli biçimde deny-all kalır. `X-Correlation-Id` tek, boş olmayan canonical UUID olmalıdır; geçerli değer korunur, yoksa server UUIDv7 üretir ve response/Problem Details/audit request context boyunca taşır. Transactional outbox aynı PostgreSQL transaction'ına katılır; event ID tekrarı idempotent, farklı içerik ve aggregate sıra çakışması fail-closed davranır. Root doğrulama scripti API scope/correlation/telemetry contract, çalışan Compose DB/RLS/audit/outbox, gerçek Keycloak→ERP permission/readiness ve izole restore smoke kontrollerini de yürütür; Android Studio'nun varsayılan SDK konumunu otomatik keşfeder ve Android lint, iki JVM unit testi ile instrumentation APK derlemesini çalıştırır. Emülatörlü Compose testi yukarıdaki ayrı görevdir.
 
 ## Değişmez ana kararlar
 

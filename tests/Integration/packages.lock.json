@@ -23,6 +23,26 @@
         "dependencies": {
           "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.0"
         }
+      },
+      "kaguerp.bootstrap": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
+      "kaguerp.buildingblocks.application": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Contracts": "[1.0.0, )",
+          "KaguERP.BuildingBlocks.Domain": "[1.0.0, )"
+        }
+      },
+      "kaguerp.buildingblocks.contracts": {
+        "type": "Project"
+      },
+      "kaguerp.buildingblocks.domain": {
+        "type": "Project"
       }
     }
   }

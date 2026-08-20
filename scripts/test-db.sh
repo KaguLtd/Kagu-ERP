@@ -30,6 +30,8 @@ export KAGU_ERP_MIGRATOR_CONNECTION_STRING="${common};Username=${KAGU_ERP_MIGRAT
 export KAGU_ERP_APP_CONNECTION_STRING="${common};Username=${KAGU_ERP_APP_USER};Password=${KAGU_ERP_APP_PASSWORD};Application Name=KaguERP.IntegrationChecks"
 
 dotnet restore KaguERP.slnx --locked-mode
-dotnet run --project src/Erp.Migrator/KaguERP.Migrator.csproj --no-restore
-dotnet run --project src/Erp.Migrator/KaguERP.Migrator.csproj --no-restore
-dotnet run --project tests/Integration/KaguERP.DatabaseIntegrationChecks.csproj --no-restore
+dotnet build src/Erp.Migrator/KaguERP.Migrator.csproj --configuration Release --no-restore
+dotnet build tests/Architecture/KaguERP.ArchitectureChecks.csproj --configuration Release --no-restore
+dotnet src/Erp.Migrator/bin/Release/net10.0/KaguERP.Migrator.dll
+dotnet src/Erp.Migrator/bin/Release/net10.0/KaguERP.Migrator.dll
+dotnet tests/Architecture/bin/Release/net10.0/KaguERP.ArchitectureChecks.dll database

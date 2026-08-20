@@ -6,4 +6,8 @@
   <ItemGroup>
     <PackageReference Include="Npgsql" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
+    <ProjectReference Include="..\..\src\Erp.Bootstrap\KaguERP.Bootstrap.csproj" />
+  </ItemGroup>
 </Project>

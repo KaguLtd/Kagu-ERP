@@ -142,6 +142,8 @@ POST /api/v1/sessions/{id}/revoke
 
 Role/scope mutation `If-Match`, idempotency, ikinci onay ve audit gerektirir.
 
+MP-02 ilk dikey diliminde `GET /api/v1/me/scopes`, doğrulanmış OIDC `iss`/`sub` kimliğini ERP DB'deki aktif profile ve şirket bazlı, süreli permission kayıtlarına çözer. Token/header içinden tenant veya company kabul edilmez; bootstrap sorgusu transaction-local identity context ve RLS ile sınırlandırılır. Endpoint şimdilik yalnız `profile.read` bulunan şirket kimliklerini döndürür. `(issuer, subject)` tek tenant'a bağlıdır; çoklu tenant oturum/seçim sözleşmesi belirlenmeden bu fail-closed unique sınır gevşetilmez. İzin kararı correlation/trace ve trusted scope ile append-only audit'e yazılamazsa endpoint başarılı yanıt üretmez.
+
 ## 13. Audit olayları
 
 - Login success/failure, MFA/reset, logout/revoke.
@@ -161,7 +163,7 @@ Role/scope mutation `If-Match`, idempotency, ikinci onay ve audit gerektirir.
 - [ ] Web tokenı browser storage'da yok; CSRF testi geçiyor.
 - [ ] Android yanlış issuer/audience ve stale tokenı reddediyor.
 - [ ] Break-glass süre sonunda kapanıyor ve tüm eylemler raporlanıyor.
-- [ ] RLS pooled-connection tenant sızıntı testi geçiyor.
+- [x] MP-02 RLS pooled-connection tenant ve identity bootstrap context sızıntı testleri geçiyor.
 
 ## 15. İç kontrol ve çok katmanlı yetki ekleri
 

@@ -14,6 +14,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  bootstrap:
+    name: Clean bootstrap
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+        with:
+          version: 11.22.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+
+      - name: Bootstrap from a clean checkout
+        env:
+          KAGU_ERP_SKIP_SERVICES: "1"
+        run: bash ./scripts/bootstrap.sh
+
+      - name: Ensure bootstrap did not modify tracked files
+        run: test -z "$(git status --porcelain --untracked-files=no)"
+
   backend:
     name: Backend build and architecture
     runs-on: ubuntu-latest
@@ -42,7 +76,7 @@ jobs:
         run: dotnet format KaguERP.slnx --no-restore --verify-no-changes --verbosity minimal
 
   database:
-    name: PostgreSQL migration and RLS integration
+    name: PostgreSQL migration, RLS and restore integration
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -67,17 +101,29 @@ jobs:
       - name: Generate ephemeral local credentials
         shell: bash
         run: |
-          printf 'KAGU_ERP_POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$GITHUB_ENV"
-          printf 'KAGU_ERP_MIGRATOR_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$GITHUB_ENV"
-          printf 'KAGU_ERP_APP_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$GITHUB_ENV"
-          printf 'KEYCLOAK_POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$GITHUB_ENV"
-          printf 'KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+          write_masked_secret() {
+            local name="$1"
+            local value
+            value="$(openssl rand -hex 24)"
+            printf '::add-mask::%s\n' "$value"
+            printf '%s=%s\n' "$name" "$value" >> "$GITHUB_ENV"
+          }
+
+          write_masked_secret KAGU_ERP_POSTGRES_PASSWORD
+          write_masked_secret KAGU_ERP_MIGRATOR_PASSWORD
+          write_masked_secret KAGU_ERP_APP_PASSWORD
+          write_masked_secret KEYCLOAK_POSTGRES_PASSWORD
+          write_masked_secret KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD
+          write_masked_secret KAGU_KEYCLOAK_SMOKE_PASSWORD
 
       - name: Start isolated PostgreSQL
         run: docker compose up --detach --wait erp-db
 
       - name: Run migrations twice and RLS checks
         run: bash ./scripts/test-db.sh
+
+      - name: Run isolated restore smoke
+        run: bash ./scripts/test-restore.sh
 
       - name: Capture PostgreSQL diagnostics
         if: failure()
@@ -139,13 +185,18 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@4733eaac7c1b0da527e4206b7671e0061de1ce37 # v6
 
-      - name: Ensure Android SDK 36
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Ensure Android compile SDK 37.0
+        shell: bash
+        run: |
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          sdkmanager_path="${sdk_root}/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$sdkmanager_path"
+          "$sdkmanager_path" "platform-tools" "platforms;android-37.0" "build-tools;36.0.0"
 
       - name: Verify wrapper and run Android gates
         run: |
           chmod +x gradlew
-          ./gradlew lintDebug testDebugUnitTest --no-daemon
+          ./gradlew lintDebug testDebugUnitTest assembleDebugAndroidTest --no-daemon
 
   secrets:
     name: Secret scan

@@ -10,6 +10,9 @@ internal sealed class MigrationRunner(string connectionString)
     private static readonly MigrationDefinition[] Migrations =
     [
         new("0001_platform_and_organization_scope", "0001_platform_and_organization_scope.sql"),
+        new("0002_identity_membership_and_permissions", "0002_identity_membership_and_permissions.sql"),
+        new("0003_append_only_authorization_audit", "0003_append_only_authorization_audit.sql"),
+        new("0004_transactional_outbox", "0004_transactional_outbox.sql"),
     ];
 
     public async Task<int> RunAsync(CancellationToken cancellationToken)

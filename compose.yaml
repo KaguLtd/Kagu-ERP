@@ -57,6 +57,7 @@ services:
     command:
       - start-dev
       - --hostname=http://localhost:58080
+      - --import-realm
     environment:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://keycloak-db:5432/${KEYCLOAK_POSTGRES_DB:?Set KEYCLOAK_POSTGRES_DB in .env}
@@ -64,12 +65,15 @@ services:
       KC_DB_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD:?Set KEYCLOAK_POSTGRES_PASSWORD in .env}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:?Set KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME in .env}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:?Set KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD in .env}
+      KAGU_KEYCLOAK_SMOKE_PASSWORD: ${KAGU_KEYCLOAK_SMOKE_PASSWORD:?Set KAGU_KEYCLOAK_SMOKE_PASSWORD in .env}
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "true"
       KC_HTTP_MANAGEMENT_HEALTH_ENABLED: "true"
     depends_on:
       keycloak-db:
         condition: service_healthy
+    volumes:
+      - ./deploy/docker/keycloak/import:/opt/keycloak/data/import:ro
     ports:
       - 127.0.0.1:58080:8080
     healthcheck:
@@ -87,7 +91,7 @@ services:
 
 networks:
   private:
-    internal: true
+    driver: bridge
 
 volumes:
   erp-postgres-data:

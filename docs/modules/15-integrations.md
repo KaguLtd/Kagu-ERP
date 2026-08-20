@@ -124,6 +124,8 @@ KKTC resmi e-Fatura profili genel UBL’den ayrı adapter profile’dır; yalnı
 
 Outbox event; aggregate_id, aggregate_sequence, event_id, schema_version ve occurred_at taşır. Aynı aggregate sırası korunur; consumer event_id ile idempotenttir. Business transaction rollback olursa outbox yayınlanmaz. Publish sonrası işaretleme öncesi crash duplicate teslim yaratabilir; bu normal test senaryosudur.
 
+MP-02 temeli `platform.outbox_message` ve `PostgresOutboxWriter` ile uygulanmıştır. Writer çağıranın mevcut DB connection/transaction'ına katılır ve commit açmaz. Aynı `event_id` + aynı canonical içerik no-op; aynı kimlikte farklı içerik veya aynı aggregate sequence için farklı event fail-closed olur. RLS tenant/company kapsamını zorlar. Worker leasing/publish/retry davranışı için kolon ve indeks sözleşmesi hazırdır; gerçek provider dispatch ve ayrı worker login rolü ilgili entegrasyon dikey diliminde tamamlanacaktır.
+
 Inbound dedup yalnız file hash’e dayanmaz: provider + account/document type + external ID/sequence + version uygun unique anahtardır. Aynı dış ID farklı payload hash’iyle gelirse overwrite değil conflict/quarantine oluşur.
 
 Dead-letter replay yalnız delivery/mapping aşamasını tekrarlar; posted source event, numara, payment, allocation veya GL yeniden oluşturulmaz. Operasyon ekranı source, attempt, last error class, next action, owner ve reconciliation state’i gösterir.

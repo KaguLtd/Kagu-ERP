@@ -3,7 +3,7 @@
 - **Amaç:** Kagu ERP için bağımsız, temiz ortamda kurulabilir, sürümleri sabitlenmiş ve güvenlik sınırları tanımlı monorepo geliştirme tabanı oluşturmak.
 - **Master fazı ve kapısı:** MP-02 / temiz kurulum, CI, scoped auth örneği, migration ve restore smoke çıkış kapısı.
 - **Risk sınıfı:** R3 — auth/tenant, PostgreSQL/RLS, migration, secret ve backup/restore içerir.
-- **Durum:** in-progress
+- **Durum:** validating
 - **Sahip:** Teknik lider, güvenlik/veri sorumlusu ve operasyon sorumlusu; isim atamaları MP-01 içinde bekleniyor.
 - **Başlangıç / hedef tarih:** 2026-08-19 / isimli sahip ve kapasite doğrulamasından sonra belirlenecek.
 - **İlgili requirement ID'leri:** ARCH-001–011, API-001–010 ve MP-02 çıkış kapısı; IAM/DATA/SEC/OPS/DR requirement aileleri.
@@ -22,7 +22,7 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 - `Kagu ERP` klasörü 2026-08-19 tarihinde bağımsız Git repository olarak `main` dalıyla başlatıldı.
 - GitHub remote: `https://github.com/KaguLtd/Kagu-ERP.git`; `main` dalı ilk bootstrap commit'i `71c8faf` ile yayımlanmıştır.
 - Repository'de v1.2 şartname paketi, yaşayan görev/karar kayıtları ve ilk .NET modüler monolit iskeleti vardır.
-- Yerel doğrulamada Git 2.54.0, .NET SDK 10.0.204, Node.js 24.15.0 ve pnpm 11.19.0 kullanılabilir bulundu. Java ve Docker bulunamadı.
+- Yerel doğrulamada Git 2.54.0, .NET SDK 10.0.204, Node.js 24.15.0, pnpm 11.19.0, Eclipse Temurin JDK 17.0.20 ve Android Studio 2026.1.3/SDK kullanılabilir bulundu. WSL 2.7.12 ve Docker Desktop 4.87.0 (Engine 29.7.2, Compose 5.4.0) çalışmaktadır.
 
 ## Kapsam
 
@@ -31,7 +31,7 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 - Root repository hijyeni, format ve line-ending kuralları.
 - .NET 10 solution, merkezi build/package yönetimi ve modüler monolit başlangıç projeleri.
 - pnpm workspace ve React/TypeScript web başlangıcı.
-- Android Gradle/Kotlin/Compose başlangıç yapısı; local SDK yoksa doğrulanabilir iskelet ve açık blokaj.
+- Android Gradle/Kotlin/Compose başlangıç yapısı, local lint/unit/instrumentation derleme ve managed-device Compose testi.
 - Local PostgreSQL/Keycloak Compose; yalnız local/private port politikası.
 - Migration harness, gerçek PostgreSQL integration test altyapısı ve tenant/company/RLS spike.
 - Health/readiness, structured log/correlation, audit context ve outbox temeli.
@@ -77,14 +77,14 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 | 1 | Repository sınırı ve root hijyeni | Bağımsız root, `main`, `origin`, `.gitignore`, `.gitattributes`, `.editorconfig`, root komut sözleşmesi | completed |
 | 2 | Sürüm sabitleme ve backend solution | `global.json`, central props/packages, solution build ve architecture test başlangıcı | completed |
 | 3 | Web workspace | pnpm frozen install, TypeScript strict, lint/typecheck/test/build | completed |
-| 4 | Android workspace | Gradle wrapper/version catalog, lint/unit build veya kayıtlı SDK blokajı | blocked — scaffold hazır; JDK 17/Android SDK yok |
-| 5 | Local Compose | PostgreSQL/Keycloak health ve yalnız local güvenli port doğrulaması | in-progress — tanım hazır; Docker ile runtime health bekliyor |
-| 6 | Migration ve DB test harness | Boş/verili gerçek PostgreSQL migration + integration test | in-progress — temiz DB, checksum ve idempotency geçti; sonraki migration ile populated-upgrade kanıtı bekliyor |
-| 7 | Tenant/company/RLS spike | App filtresi + RLS + pooled connection negatif testleri | in-progress — DB/RLS ve pool negatifleri geçti; API app filtresi bekliyor |
-| 8 | Auth/scope/audit örneği | Authenticated örnek istek, permission/company scope ve audit correlation | pending |
-| 9 | Health/telemetry/outbox | Readiness, structured log/trace ve duplicate-safe outbox iskeleti | pending |
-| 10 | Local restore smoke | Backup, ayrı hedefe restore, auth/scope ve DB smoke | pending |
-| 11 | CI ve temiz kurulum | Belgelenmiş bootstrap/verify ile clean checkout kapısı | in-progress — ilk remote run `32229247173` tamamlandı; web ve secret scan geçti, backend/DB/Android altyapı hataları açık |
+| 4 | Android workspace | Gradle wrapper/version catalog, lint/unit/instrumentation derleme ve managed-device Compose testi | completed — JDK 17, Android SDK, lint, 2 JVM testi, test APK'sı ve API 29 emülatörde 1 Compose semantics testi geçti |
+| 5 | Local Compose | PostgreSQL/Keycloak health ve yalnız local güvenli port doğrulaması | completed — üç container healthy; host portları yalnız loopback, Keycloak DB host'a kapalı |
+| 6 | Migration ve DB test harness | Boş/verili gerçek PostgreSQL migration + integration test | completed — `0002` mevcut `0001` verili şemaya ileri uygulandı; checksum, ikinci koşu idempotency ve gerçek DB integration geçti |
+| 7 | Tenant/company/RLS spike | App filtresi + RLS + pooled connection negatif testleri | completed — deny-by-default API scope guard, DB/RLS ve pool negatifleri geçti |
+| 8 | Auth/scope/audit örneği | Authenticated örnek istek, permission/company scope ve audit correlation | completed — JWT→ERP DB aktif üyelik/şirket/permission ve correlation zincirli append-only authorization audit geçti |
+| 9 | Health/telemetry/outbox | Readiness, structured log/trace ve duplicate-safe outbox iskeleti | completed — DB-backed readiness, JSON route-template telemetry ve transaction/duplicate/scope testli outbox temeli geçti |
+| 10 | Local restore smoke | Backup, ayrı hedefe restore, auth/scope ve DB smoke | completed — ayrı rastgele DB'ye pg_dump/pg_restore, migration/RLS/IAM/audit/outbox ve Keycloak auth geçti; cleanup sıfır artıkla doğrulandı |
+| 11 | CI ve temiz kurulum | Belgelenmiş bootstrap/verify ile clean checkout kapısı | validating — bağımsız temiz kaynak bootstrap geçti; ilk remote run kusurları düzeltildi, yeni remote koşu bekliyor |
 
 ## Test planı
 
@@ -96,7 +96,7 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 - Migration: boş ve örnek verili DB, ileri uyumluluk, lock/rollback değerlendirmesi.
 - Restore: sentetik backup'ın ayrı local hedefe gerçek restore'u ve smoke.
 - Web: typecheck, component smoke, erişilebilirlik temeli.
-- Android: Gradle lint/unit; unavailable local SDK açık blokaj olarak raporlanır.
+- Android: Gradle lint, JVM unit, instrumentation APK derleme; API 29 x86_64 managed-device üzerinde Compose semantics testi.
 - Uygulanmaz: MP-03 golden accounting cycle bu platform görevinde henüz yoktur.
 
 ## Riskler ve kararlar
@@ -107,17 +107,21 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 | 2026-08-19 | GitHub remote başlangıçta boştu | Geçmiş/branch conflict olmadan `main` başlatılabildi | `71c8faf` ilk bootstrap commit'i olarak pushlandı; CI run `32229247173` oluşturuldu |
 | 2026-08-19 | İsimli teknik/güvenlik/ops sahipleri yok | MP-02 çıkış kabulü tamamlanamaz | MP-01 içinde atanacak |
 | 2026-08-19 | Yerel Node.js 24.15.0 ve pnpm 11.19.0, hedef 24.19.0 ve 11.22.0'ın gerisinde | Temiz kurulum hedef sürümleri ayrıca indirmeli | Hedefler resmi sürüm kaynaklarıyla sabitlendi; mevcut sürümler uyumluluk aralığında |
-| 2026-08-19 | Java, Android SDK ve Docker yerelde bulunamadı | Android ve Compose runtime milestone'ları şu anda doğrulanamaz | Kullanıcı JDK 17, Android Studio/SDK ve Docker Desktop kurulumunu başlattı; tanımlar bu sırada hazırlanıyor |
-| 2026-08-19 | Android lint/unit ve Compose UI testleri çalıştırılamadı | Android kaynaklarının derleme/cihaz kanıtı yok | JDK 17 + Android SDK kurulumu gerekli; root verify bunu warning ve açık kapı olarak taşır |
+| 2026-08-20 | Android Studio 2026.1.3 kuruldu; ilk wizard API 37.1 sistem imajını bulamadı | IDE mevcut olsa da SDK/cihaz testi başlangıçta eksikti | Varsayılan SDK keşfedildi; platform 37.0/build-tools 36.0.0 doğrulandı, API 29 x86_64 Gradle managed device ile gerçek Compose testi geçti |
+| 2026-08-20 | Compose `internal` ağı Windows host port yayınını işlevsiz bıraktı | Container'lar healthy olsa da ERP DB ve Keycloak host'tan erişilemiyordu | Ağ bridge olarak tanımlandı; yalnız ERP DB `127.0.0.1:55432` ve Keycloak `127.0.0.1:58080` yayınlanır, Keycloak DB host'a kapalı kalır |
 | 2026-08-19 | TypeScript 7.0.2, typescript-eslint 8.67.0 peer aralığının dışında | Lint tip bilgisi güvenilir değil | Resmi 6.0 bakım sürümü olan TypeScript 6.0.3'e sabitlendi; `pnpm peers check` temiz |
 | 2026-08-19 | İlk web runtime bağımlılıkları eklendi | Lisans, bakım ve bundle yüzeyi | React, TanStack Query, React Hook Form, React Router ve Zod güncel kararlı tam sürümlere kataloglandı; doğrudan runtime paketlerinin tamamı MIT |
 | 2026-08-19 | CI üçüncü taraf action çalıştırır | Tag hareketiyle supply-chain riski | Checkout/setup/Gradle/Gitleaks action referansları resmi major tag'lerin tam commit SHA'larına sabitlendi; Dependabot review PR'ı açar, otomatik merge yok |
 | 2026-08-19 | Gitleaks action organizasyon/private repo koşulu ilk remote run'da doğrulanmadı | Secret scan job lisans nedeniyle bloklanabilir | İlk remote run'da secret scan geçti; action bu private repository'de çalışıyor |
-| 2026-08-19 | İlk remote CI backend, DB ve Android işlerinde başarısız oldu | Clean-checkout/CI kapısı kapanamaz | Linux path normalizasyonu, Compose host portu ve `sdkmanager` kurulumu ayrı düzeltme işidir; web ve secret scan geçti |
-| 2026-08-19 | CI tarafından üretilen ephemeral local parolalar job logundaki environment bloğunda maskelenmedi | Private logda kısa ömürlü sentetik credential görünürlüğü | Değerler yalnız sonlandırılmış runner/local DB içindi; sonraki DB CI koşusundan önce `add-mask` veya secret-safe aktarım zorunlu |
+| 2026-08-19 | İlk remote CI backend, DB ve Android işlerinde başarısız oldu | Clean-checkout/CI kapısı kapanamaz | Linux path normalizasyonu, bridge Compose ağı ve Android SDK command-line tools tam yolu uygulandı; yerel clean bootstrap geçti, yeni remote run bekliyor |
+| 2026-08-19 | CI tarafından üretilen ephemeral local parolalar job logundaki environment bloğunda maskelenmedi | Private logda kısa ömürlü sentetik credential görünürlüğü | Değerler yalnız sonlandırılmış runner/local DB içindi; yeni workflow her değeri `$GITHUB_ENV` yazımından önce `add-mask` ile maskeler, remote kanıt bekliyor |
 | 2026-08-19 | Production veri konumu/RPO-RTO kararı açık | Uzak backup ve dış telemetry kapsam dışı | Yalnız local sentetik smoke |
 | 2026-08-19 | Migration/runtime aynı DB kimliğiyle çalışırsa RLS ve DDL sınırı zayıflar | Tenant sızıntısı veya schema değiştirme riski | Login olmayan `kagu_erp_schema_owner`, NOINHERIT migrator ve owner/superuser/BYPASSRLS olmayan runtime rolleri ayrıldı |
 | 2026-08-19 | Yeni PostgreSQL istemci bağımlılığı gerekir | Lisans, bakım ve supply-chain yüzeyi | Resmi NuGet'teki güncel kararlı Npgsql 10.0.3 merkezi pinlendi; paket PostgreSQL lisanslıdır |
+| 2026-08-20 | JWT bearer doğrulaması için yeni ASP.NET paketi gerekir | Token doğrulama ve supply-chain yüzeyi | Resmi Microsoft `Microsoft.AspNetCore.Authentication.JwtBearer` 10.0.11 merkezi pinlendi; MIT lisans, lockfile ve issuer/audience negatif smoke ile sınırlandı |
+| 2026-08-20 | Direct password grant modern web/mobil production akışı değildir | Yanlışlıkla production realm'e taşınırsa kimlik güvenliği zayıflar | Client yalnız local import dosyasında sentetik smoke kullanıcıya açıktır; production Authority/config zorunlu ve web/mobil akışları BFF/PKCE kalır |
+| 2026-08-20 | MP-02 bootstrap resolver bir `(issuer, subject)` kimliğini tek tenant'a bağlar | Gelecekte aynı IdP kimliğiyle çoklu tenant üyeliği gerekirse mevcut unique constraint yetersiz kalır | İlk dikey dilimde privilege birleşmesini önleyen fail-closed sınır olarak tutuldu; tenant seçimi sözleşmesi netleşmeden gevşetilmeyecek ve sonraki değişiklik expand migration gerektirecek |
+| 2026-08-20 | Local API ve worker outbox tablosunda aynı runtime DB rolünü kullanır | API ele geçirilirse scope içindeki outbox satırlarında worker yetkilerine ulaşabilir | MP-02 local iskelette RLS ve ayrı application contract ile sınırlı; production secret/topoloji kararıyla ayrı worker login rolü oluşturulmadan canlı kabul verilmeyecek |
 
 ## İlerleme günlüğü
 
@@ -140,7 +144,7 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 - Tarayıcı token storage'ı eklenmedi; health isteği same-origin cookie sınırında ve iptal sinyaliyle çalışır. Vite yalnız geliştirmede `/health` yolunu yerel API'ye proxy eder.
 - Web `lint`, strict `typecheck`, iki component testi ve production build kapıları geçti. `pnpm peers check` bağımlılık uyumsuzluğu bulmadı.
 - Doğrudan web runtime bağımlılıklarının lisansları yerel package manifestlerinden MIT olarak doğrulandı.
-- Android için AGP 9.3.1, Gradle 9.5.0, Kotlin 2.4.10, Compose BOM 2026.06.01, compile/target SDK 36 ve minSdk 29 sabitlendi. Gradle dağıtım SHA-256 değeri resmi kaynaktan wrapper'a eklendi.
+- Android için AGP 9.3.1, Gradle 9.5.0, AGP 9 built-in Kotlin ile uyumlu Kotlin Compose compiler plugin 2.2.10, Compose BOM 2026.06.01, compile SDK 37.0, target SDK 36 ve minSdk 29 sabitlendi. Gradle dağıtım SHA-256 değeri resmi kaynaktan wrapper'a eklendi.
 - Tek Activity Compose kabuğu, güvenli manifest başlangıcı, ortak çalışma bağlamı modeli, iki JUnit testi ve bir Compose semantics testi oluşturuldu.
 - Wrapper JAR içinde `GradleWrapperMain.class` ve Android XML kaynaklarının parse edilebilirliği doğrulandı. Wrapper JAR SHA-256: `497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7`.
 - `gradlew.bat --version`, beklendiği gibi `java.exe` bulunamadığı için exit 1 verdi. Android lint/unit/Compose testleri çalıştırılmadı ve başarılı sayılmadı.
@@ -149,7 +153,7 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 - Dependabot; GitHub Actions, npm/pnpm, Gradle ve NuGet için haftalık ve insan incelemeli güncelleme PR'ları açacak şekilde yapılandırıldı.
 - GitHub-hosted Gitleaks işi ilk remote koşuda geçti; Android işi `sdkmanager` bulunamadığı için lint/unit aşamasına ulaşamadı.
 - Local geliştirme için `postgres:18.4-trixie` tabanlı ayrı ERP/Keycloak veritabanları ve `quay.io/keycloak/keycloak:26.7.0` tanımlandı. ERP DB ve Keycloak yalnız loopback'e yayımlanır; Keycloak DB host'a yayımlanmaz.
-- Compose verileri ayrı named volume'larda tutulur; PostgreSQL 18'in sürüme özel `PGDATA` yolu kullanılır. Local servisler yalnız internal Compose ağıyla haberleşir.
+- Compose verileri ayrı named volume'larda tutulur; PostgreSQL 18'in sürüme özel `PGDATA` yolu kullanılır. Keycloak DB host'a yayımlanmaz; host erişimi gereken local servisler yalnız `127.0.0.1` adresine bind edilir.
 - `.env.example` yalnız açık sentetik placeholder taşır. Windows ve POSIX bootstrap betikleri mevcut `.env` dosyasını korur, yoksa rastgele local parolalar üretir; repository'ye production secret eklenmez.
 - Compose config, image pull ve PostgreSQL/Keycloak health kontrolleri Docker kurulunca çalıştırılacaktır; tanımın varlığı runtime kapısını geçmiş sayılmaz.
 - Ayrı `KaguERP.Migrator` CLI'si eklendi. Connection string yalnız environment üzerinden alınır; migration'lar embedded, sıralı ve SHA-256 checksum ile `platform.schema_migration` tablosunda izlenir. Bilinmeyen/sonradan değiştirilmiş migration fail-closed davranır ve eşzamanlı çalıştırma PostgreSQL advisory lock ile seri hale gelir.
@@ -164,6 +168,60 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 - Bu yaşayan MP-02 planı oluşturuldu.
 - Sıradaki teknik kapılar JDK 17 + Android SDK ile Android build ve Docker ile local Compose runtime doğrulamasıdır. Araçlar kurulurken migration harness için local altyapı sözleşmesi hazırlanabilir.
 
+### 2026-08-20
+
+- Eclipse Temurin JDK 17.0.20, WSL 2.7.12 ve Docker Desktop 4.87.0 doğrulandı. Docker Engine 29.7.2 ve Compose 5.4.0 `desktop-linux` context'i üzerinde çalışmaktadır.
+- `gradlew.bat --version`, sabitlenmiş Gradle 9.5.0 dağıtımını checksum doğrulamasıyla indirip JDK 17 üzerinde başarıyla çalıştı. Android SDK eksik olduğu için lint/unit/Compose testleri hâlâ başarılı sayılmayan açık kapıdır.
+- PowerShell bootstrap ve verify betikleri per-user Docker Desktop kurulumunu PATH güncellenmemiş olsa da standart kurulum konumundan bulacak şekilde sertleştirildi.
+- Compose ağı bridge olarak düzeltildi. `erp-db`, `keycloak-db` ve `keycloak` container'ları healthy oldu; yalnız ERP DB `127.0.0.1:55432` ve Keycloak `127.0.0.1:58080` host'a yayımlandı. Keycloak DB host'a yayımlanmadı.
+- Keycloak master realm OIDC discovery endpoint'i HTTP 200 verdi. Gerçek Compose PostgreSQL üzerinde migration iki kez 0 yeni migration ile idempotent tamamlandı ve tenant/company RLS, çapraz-scope ve connection-pool negatif testleri geçti.
+- Windows Uygulama Denetimi tarafından generated apphost `.exe` dosyalarının engellenmesine karşı doğrulama betikleri derlenmiş assembly'leri `dotnet <assembly>.dll` yoluyla çalıştırır; güvenlik politikası devre dışı bırakılmadı.
+- Full `scripts/verify.ps1` geçti: locked restore, .NET Release build (0 warning/0 error), 8 source proje architecture kontrolü, format, web lint/typecheck, 2 component testi, production build, migration idempotency ve gerçek PostgreSQL RLS kontrolleri başarılıdır. Yalnız Android SDK kapısı warning olarak açıktır.
+- `/api/v1` için merkezi application-scope middleware eklendi. Anonim istek, istemciden gelen `X-Tenant-Id`/`X-Company-Id`, ERP üyeliği çözülemeyen kimlik, çapraz tenant ve yetkisiz company senaryoları deny-by-default davranır; Problem Details yanıtlarında stabil güvenli kod bulunur.
+- `ExecutionScope` yalnız trusted application resolver tarafından sağlanır. Gerçek IAM üyelik/permission resolver'ı milestone 8'e kadar eklenmediğinden varsayılan resolver tüm business API isteklerini fail-closed reddeder; token claim/header tek başına business scope sayılmaz.
+- API application-scope contract kontrolleri root PowerShell/POSIX verify akışına bağlandı. Windows Uygulama Denetimi uyumu için .NET test/migration assembly'leri generated apphost yerine `dotnet <assembly>.dll` ile çalıştırılır.
+- Gerçek API process smoke testinde `/health/live` HTTP 200; anonim `/api/v1/companies` isteği HTTP 401 ve `AUTHENTICATION_REQUIRED` güvenli hata kodu döndürdü.
+- Milestone 7 tamamlandı; milestone 8 authenticated ERP membership/permission/company scope ve audit correlation dilimi başlatıldı.
+- Merkezi correlation middleware eklendi. Tek canonical UUID biçimindeki istemci değeri korunur; değer yoksa UUIDv7 üretilir; boş, bozuk veya çoklu değer `400 INVALID_CORRELATION_ID` ile endpoint'ten önce reddedilir.
+- Correlation ID response header, güvenli Problem Details, Activity tag ve immutable audit request context içinde aynı değer olarak taşınır. Audit context ayrıca trace, trusted tenant/actor/company scope ve varsa opaque session ID içerir; token/cookie veya business payload taşımaz.
+- API contract testleri generated/preserved/invalid correlation, Problem Details korelasyonu ve önceki scope negatiflerini birlikte doğrular. Full `scripts/verify.ps1` yeniden geçti: .NET build/format/mimari/API contract, web lint/typecheck/2 test/build, migration idempotency ve gerçek PostgreSQL RLS kontrolleri başarılıdır.
+- Gerçek API smoke testinde health response server correlation ID döndürdü; istemci correlation değeri anonim `401 AUTHENTICATION_REQUIRED` Problem Details ve response header'da aynen korundu; bozuk değer `400 INVALID_CORRELATION_ID` aldı.
+- Milestone 8'in sıradaki dilimi, OIDC `iss`/`aud`/signature/expiry doğrulamasından geçen Keycloak subject'ini ERP DB'deki aktif üyelik, permission ve company scope ile çözmek; authorization kararını append-only audit persistence'a bağlamaktır.
+- Microsoft `Microsoft.AspNetCore.Authentication.JwtBearer` 10.0.11 merkezi olarak pinlendi. Paket resmi Microsoft/ASP.NET bileşenidir ve MIT lisanslıdır; JWT signature, issuer, audience, lifetime, expiry ve signed-token kontrolleri açık, inbound claim remapping/token persistence/hata ayrıntısı kapalıdır.
+- API production configuration'da Authority/Audience eksikse startup fail-closed olur. Metadata HTTPS varsayılan zorunludur; HTTP yalnız `appsettings.Development.json` içindeki loopback Keycloak authority için açıkça izinlidir.
+- Local Compose startup importu `kagu-local-test` realm, bearer-only `kagu-erp-api` audience ve local-only smoke client/user oluşturur. Smoke parolası yalnız ignored `.env` içinde rastgele üretilir; realm JSON'da environment placeholder bulunur ve production akışına direct grant taşınmaz.
+- Gerçek Keycloak token smoke matrisi geçti: doğru issuer + `kagu-erp-api` audience tokenı authentication'ı geçip deny-by-default ERP resolver'da `403 APPLICATION_SCOPE_REQUIRED`; aynı kullanıcıya ait fakat ERP audience içermeyen token `401 AUTHENTICATION_REQUIRED` aldı. Response token veya framework hata ayrıntısı içermedi.
+- `scripts/test-auth.ps1` discovery issuer'ını ve iki token senaryosunu tekrarlanabilir çalıştırır; token/parola yazmaz, ayrı smoke portu kullanır ve başlattığı API sürecini `finally` içinde kapatır. Root verify bu testi çalışan Keycloak olduğunda otomatik çağırır.
+- Windows Uygulama Denetimi yeni ayrı API contract DLL'ini engellediğinde politika kapatılmadı. Aynı kontroller mevcut ve izinli architecture quality harness'ına taşındı; birleştirilmiş harness ile full verify geçti.
+- Son full `scripts/verify.ps1`: locked restore, Release build (0 warning/0 error), architecture + API scope/correlation contract, format, web lint/typecheck/2 test/build, migration idempotency, gerçek PostgreSQL RLS ve gerçek Keycloak issuer/audience smoke başarılı. Yalnız Android SDK kapısı warning olarak açıktır.
+- `0002_identity_membership_and_permissions` expand migration'ı RLS korumalı `iam.user_profile` ve şirket bazlı, zaman aralıklı `iam.user_company_permission` tablolarını ekledi. Runtime rolü yalnız identity context'iyle SELECT yapabilir; owner/superuser/BYPASSRLS ayrımı korunur. Geri dönüş, tablo düşürme yerine uygulama deploy'unu geri alma ve migration öncesi backup'tan kontrollü restore/compensation yoludur.
+- Gerçek PostgreSQL testinde doğru `iss`/`sub` tenant, aktör, iki şirket ve şirket bazlı permission setine çözüldü; yanlış/çoklu claim, bilinmeyen subject, süresi dolmuş permission, şirketler arası permission birleşmesi ve pooled identity-context sızıntısı reddedildi.
+- `/api/v1/me/scopes` yalnız `profile.read` izni olan şirketleri döndüren ilk authenticated permission örneği olarak eklendi. Keycloak smoke, doğru token için ERP DB fixture üzerinden HTTP 200; yanlış audience için 401 doğruladı ve fixture'ı sonunda temizledi.
+- Windows Uygulama Denetimi yeni Infrastructure test assembly'sini engellediğinde politika kapatılmadı; runtime resolver izinli mevcut Bootstrap assembly'sine alındı ve aynı gerçek DB davranışı integration harness'ında doğrulandı.
+- Full `scripts/verify.ps1` tekrar geçti: locked restore, Release build (0 warning/0 error), architecture/API contract, format, web lint/typecheck/2 test/build, populated migration idempotency, gerçek PostgreSQL IAM/RLS ve gerçek Keycloak→ERP permission smoke başarılıdır. Yalnız Android SDK kapısı warning olarak açıktır.
+- `0003_append_only_authorization_audit` migration'ı correlation/trace, trusted tenant/actor/company scope, eylem, hedef, sonuç ve güvenli reason code taşıyan `platform.audit_event` tablosunu ekledi. Runtime rolü yalnız RLS kapsamlı INSERT sahibidir; SELECT/UPDATE/DELETE yetkileri yoktur.
+- `GET /api/v1/me/scopes` izin/verme ve permission ret kararını audit yazımıyla bağlar; audit yazılamazsa başarılı response üretilmez. Gerçek DB testleri tek kayıt, kapsam doğruluğu, non-append privilege reddi ve başka şirket kapsamıyla audit insert reddini kanıtlar.
+- Audit dilimi sonrası full `scripts/verify.ps1` geçti: locked restore, Release build (0 warning/0 error), architecture/API contract, format, web lint/typecheck/2 test/build, migration idempotency, gerçek PostgreSQL IAM/RLS/audit ve gerçek Keycloak→ERP permission smoke başarılıdır. Android SDK warning'i açık kapı olarak korunur.
+- `/health/live` proses canlılığıyla sınırlı tutuldu; `/health/ready` üç saniyelik bounded PostgreSQL probe ile hazır/503 ayrımını yapar. Gerçek erişilebilir ve erişilemez PostgreSQL testleri ile API process readiness smoke geçti.
+- API ve Worker JSON console log üretir. Request middleware; ham URL, query, header, token veya payload yerine route template, method, status, süre ve correlation ID yazar; aynı boyutlarla .NET `Meter` counter/histogram ve mevcut `Activity` route tag'i üretir. Dış exporter/veri aktarımı MP-01 kararı olmadan eklenmedi.
+- `0004_transactional_outbox` migration'ı RLS korumalı event/aggregate sequence, schema version, UTC occurred time, JSON payload, hash, retry/lease ve durum alanlarını ekledi. Writer çağıranın mevcut Npgsql transaction'ına katılır; kendi başına commit açmaz.
+- Gerçek DB testlerinde event-id tekrarı tek satır kaldı, aynı ID ile farklı payload ve aynı aggregate sequence reddedildi, çapraz-company scope reddedildi; business company kaydıyla outbox insert'i aynı rollback'te birlikte kayboldu. İleri migration geri dönüşü tablo düşürme değil roll-forward veya migration öncesi restore'dur.
+- Windows Uygulama Denetimi yeniden derlenen ayrı Integration harness DLL'ini engellediğinde politika kapatılmadı; DB/auth test modları mevcut izinli Architecture quality harness'ında birleştirildi ve aynı gerçek PostgreSQL kapsamı korundu.
+- `scripts/test-restore.ps1` kaynak local ERP DB'sini custom-format `pg_dump` ile yalnız doğrulanmış rastgele `kagu_erp_restore_*` hedefine restore etti. Restore DB'de migration 0/0 idempotency, runtime rol/RLS/IAM/audit/outbox entegrasyonu, readiness ve gerçek Keycloak→ERP auth scope smoke geçti.
+- İlk cleanup denemesinde process environment sırası Compose `.env` interpolasyonunu gölgeledi; kaynak veya restore verisi silinmedi. Cleanup sırası düzeltildi, yalnız regex ile doğrulanmış geçici DB/dump kaldırıldı ve son kontrolde restore DB sayısı 0, dump sayısı 0 bulundu.
+- POSIX restore betiği aynı izole DB ve DB-scope kontrollerini trap cleanup ile uygular. Local `pg_dump` provası production pgBackRest/WAL/PITR, blob/Keycloak backup veya RPO/RTO taahhüdü sayılmaz.
+- Restore kapısı root `scripts/verify.ps1` akışına bağlandı ve full verify geçti: locked restore, Release build 0 warning/error, architecture/safe telemetry, format, web lint/typecheck/2 test/build, kaynak DB migration/RLS/IAM/audit/outbox, Keycloak auth ve ikinci izole restore hedefinde aynı smoke başarılıdır. Yalnız Android SDK kapısı warning olarak açıktır.
+- GitHub Actions run `32229247173` job logları salt-okunur incelendi. Backend hatası `.csproj` içindeki Windows ayraçlı `ProjectReference` değerlerinin Linux'ta normalize edilmemesiydi; architecture harness her iki ayıracı platform yoluna çevirir. DB container'ı healthy olmasına rağmen `internal` Compose ağı host portunu erişilemez bırakmıştı; daha önce yerelde doğrulanan bridge düzeltmesi CI hatasının da kök nedenini kapatır.
+- CI ephemeral parolaları, `$GITHUB_ENV` dosyasına yazılmadan önce GitHub `add-mask` komutuyla maskelenir. Keycloak smoke parolası da Compose interpolasyonu için aynı rastgele ve maskeli akışa eklendi. Android işi runner'daki SDK command-line tools için `${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager` tam yolunu kullanır.
+- CI database işi migration/RLS testinden sonra POSIX izole restore smoke'u da çalıştırır. Ayrı `Clean bootstrap` işi temiz checkout'ta locked NuGet restore ve frozen pnpm install yapar ve tracked dosyaların değişmediğini doğrular.
+- Yerelde 196 source dosyasından `.git`, `.env`, `node_modules`, `bin` ve `obj` içermeyen bağımsız geçici kopya üretildi. `scripts/bootstrap.ps1 -SkipServices`; yeni rastgele `.env`, locked NuGet restore ve frozen pnpm install ile geçti; servis/volume açılmadı ve geçici kopya doğrulama sonunda silindi.
+- CI portability düzeltmelerinden sonra full `scripts/verify.ps1` tekrar geçti: Release build 0 warning/error, architecture/API contract/safe telemetry, format, web lint/typecheck/2 test/build, gerçek PostgreSQL migration/RLS/IAM/audit/outbox, gerçek Keycloak auth ve izole restore hedefi başarılıdır. Yerel Android SDK eksikliği açık warning'dir; remote CI kanıtı değişiklikler commit/push edilmeden üretilemez.
+- Repository'ye girecek 196 dosyada private-key/cloud-token/bearer ve literal credential örüntü taraması yapıldı; bulunan password/token referansları yalnız `CHANGEME_LOCAL_ONLY_*`, environment aktarımı veya loglanmayan smoke değişkenleridir. `.env` tracked değildir; auth smoke başarı mesajı token/parola taşımaz. NuGet doğrudan ve transit paket taraması ile `pnpm audit --audit-level high` bilinen zafiyet bulmadı. İlk remote Gitleaks işi geçti; mevcut değişiklikler için yeni remote secret scan hâlâ CI kanıtının parçasıdır.
+- Android Studio 2026.1.3 varsayılan SDK'sı `%LOCALAPPDATA%\Android\Sdk` altında keşfedildi. Root PowerShell/POSIX verify betikleri SDK ortam değişkeni yokken standart konumu bulur, JDK 17 ile platform 37.0/build-tools 36.0.0 varlığını fail-fast doğrular ve `lintDebug testDebugUnitTest assembleDebugAndroidTest` çalıştırır.
+- AGP 9 built-in Kotlin geçişi nedeniyle eski `org.jetbrains.kotlin.android` plugin'i kaldırıldı; AGP 9.3.1'in metadata bağımlılığıyla uyumlu Kotlin Compose plugin 2.2.10 kullanıldı. Lifecycle 2.11.0 gereksinimi nedeniyle compile SDK 37.0'a çıkarıldı; target SDK 36 ve minSdk 29 değiştirilmedi. Deprecated Compose test rule importu `junit4.v2` API'sine taşındı.
+- `pixel2Api29` x86_64 Gradle managed device tanımlandı. İlk koşu API 29 AOSP sistem imajını lisanslı SDK akışıyla kurdu; 1 Compose semantics instrumentation testi emülatörde geçti. Root verify'ın instrumentation APK derlemesinden ayrı bu koşu `:app:pixel2Api29DebugAndroidTest` göreviyle tekrarlanabilir.
+- Android düzeltmelerinden sonraki full `scripts/verify.ps1` geçti: .NET Release build 0 warning/error, architecture/API contract/safe telemetry, format, web lint/typecheck/2 test/build, gerçek PostgreSQL migration/RLS/IAM/audit/outbox, gerçek Keycloak auth, izole restore ve Android lint/2 JVM testi/instrumentation APK derlemesi başarılıdır. Yerel MP-02 Android blokajı kapanmıştır; yalnız değişikliklerin commit/push edilmesinden sonraki temiz remote CI kanıtı açıktır.
+
 ## Tamamlanma kanıtı
 
 - [x] Bağımsız repository sınırı ve remote.
@@ -171,13 +229,13 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 - [x] Backend build ve architecture kapısı.
 - [x] Web lint/typecheck/component test/build kapısı.
 - [x] Android wrapper/version catalog ve statik scaffold kanıtı.
-- [ ] Android lint/unit/Compose test kapısı — JDK 17 ve Android SDK blokajı.
-- [ ] Local Compose — tanım/bootstrap hazır; Docker runtime health bekliyor.
-- [ ] Migration harness — temiz gerçek PostgreSQL, checksum ve idempotency geçti; populated-upgrade senaryosu sonraki migration'ı bekliyor.
-- [ ] Tenant/company/RLS negatif testleri — DB ve pool katmanı geçti; API application-filter katmanı bekliyor.
-- [ ] Authenticated scoped örnek ve audit.
-- [ ] Health/telemetry/outbox temeli.
-- [ ] Local restore smoke.
-- [ ] CI ve temiz kurulum kanıtı — ilk remote run `32229247173` başarısız; backend path portability, DB port erişimi, Android SDK kurulumu ve ephemeral secret masking açık.
-- [ ] Güvenlik/secret/PII incelemesi.
+- [x] Android lint/unit/Compose test kapısı — lint, 2 JVM testi, instrumentation APK derlemesi ve API 29 managed-emulator üzerinde 1 Compose semantics testi geçti.
+- [x] Local Compose — üç servis healthy, loopback port sınırı ve OIDC discovery doğrulandı.
+- [x] Migration harness — temiz ve örnek verili gerçek PostgreSQL, checksum, ileri migration ve idempotency geçti.
+- [x] Tenant/company/RLS negatif testleri — deny-by-default API application guard, DB/RLS ve pooled connection katmanları geçti.
+- [x] Authenticated scoped örnek ve audit — Keycloak→ERP permission/company scope ve append-only correlation audit geçti.
+- [x] Health/telemetry/outbox temeli — DB readiness, güvenli JSON route telemetry ve transactional duplicate-safe outbox gerçek DB testleri geçti.
+- [x] Local restore smoke — ayrı hedefte migration, DB scope/outbox ve gerçek Keycloak auth geçti; kaynak DB/volume değişmedi ve geçici artık kalmadı.
+- [ ] CI ve temiz kurulum kanıtı — bağımsız yerel temiz bootstrap geçti; run `32229247173` kök nedenleri düzeltildi, ancak yeni remote run henüz yok.
+- [x] Güvenlik/secret/PII incelemesi — tracked kaynak örüntü taraması ve güncel NuGet/pnpm vulnerability sorguları temiz; yeni remote Gitleaks koşusu CI maddesinde bekliyor.
 - [ ] MP-02 çıkış kapısı değerlendirmesi.

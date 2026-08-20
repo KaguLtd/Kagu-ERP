@@ -18,6 +18,8 @@ Her HTTP/worker/DB/dış çağrı:
 
 taşır. Müşteri adı, VKN, fatura satırı, IBAN, token, cookie, secret, dosya içeriği ve SQL parametresi loglanmaz.
 
+MP-02 başlangıcında API/Worker stdout logları JSON olarak yapılandırılmıştır. HTTP completion olayı ham URL veya kaynak ID yerine route template, method, status, süre ve correlation ID taşır; aynı düşük cardinality boyutları `KaguERP.Api` Meter counter/histogram ve Activity route tag'inde üretilir. `/health/live` proses, `/health/ready` PostgreSQL bağımlılık durumudur. Haricî collector/exporter ve KKTC dışına telemetry aktarımı yazılı veri konumu kararı olmadan etkinleştirilmez.
+
 ## 3. Sinyaller
 
 ### API/web/mobile
