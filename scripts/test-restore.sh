@@ -42,5 +42,5 @@ restore_created=true
 docker compose exec -T erp-db pg_restore --username "$KAGU_ERP_POSTGRES_USER" --dbname "$restore_database" --exit-on-error "$dump_path"
 
 export KAGU_ERP_POSTGRES_DB="$restore_database"
-./scripts/test-db.sh
+bash ./scripts/test-db.sh
 printf '%s\n' 'Isolated local PostgreSQL restore, migration, scope and outbox smoke checks passed.'
