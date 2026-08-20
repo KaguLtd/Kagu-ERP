@@ -6,7 +6,7 @@ Bu klasör, KKTC'de orta ölçekli bir işletme için geliştirilecek web ve And
 
 ## Uygulama durumu ve yerel doğrulama
 
-MP-02 repository bootstrap başlamıştır. Bağımsız repository `main` dalını ve `https://github.com/KaguLtd/Kagu-ERP.git` remote'unu kullanır. Backend solution, katman referans kontrolleri, strict React/TypeScript web workspace, Android/Compose proje iskeleti ve çalışan local PostgreSQL/Keycloak Compose ortamı mevcuttur. JDK 17, Android Studio/SDK, Gradle wrapper, Android lint/unit/instrumentation derleme ve API 29 managed-emulator Compose semantics testi doğrulanmış; local restore ve servis açmadan temiz bootstrap kapıları geçmiştir. Düzeltilen CI sözleşmesi için yeni remote koşu beklenmektedir.
+MP-02 repository bootstrap teknik kapsamı tamamlanmış ve kurumsal kabul için `validating` durumundadır. Bağımsız repository `main` dalını ve `https://github.com/KaguLtd/Kagu-ERP.git` remote'unu kullanır. Backend solution, katman referans kontrolleri, strict React/TypeScript web workspace, Android/Compose proje iskeleti ve çalışan local PostgreSQL/Keycloak Compose ortamı mevcuttur. JDK 17, Android Studio/SDK, Gradle wrapper, Android lint/unit/instrumentation derleme ve API 29 managed-emulator Compose semantics testi doğrulanmış; local restore ve servis açmadan temiz bootstrap kapıları geçmiştir. Commit `2f4d4ee` için GitHub Actions run `32360372748` içindeki altı job'ın tamamı başarılıdır. Fazın resmi kapanışı için MP-01 altında isimli teknik, güvenlik ve operasyon sahiplerinin kabulü beklenmektedir.
 
 Hedef toolchain:
 

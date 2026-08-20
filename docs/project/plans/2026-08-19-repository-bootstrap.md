@@ -84,7 +84,7 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 | 8 | Auth/scope/audit örneği | Authenticated örnek istek, permission/company scope ve audit correlation | completed — JWT→ERP DB aktif üyelik/şirket/permission ve correlation zincirli append-only authorization audit geçti |
 | 9 | Health/telemetry/outbox | Readiness, structured log/trace ve duplicate-safe outbox iskeleti | completed — DB-backed readiness, JSON route-template telemetry ve transaction/duplicate/scope testli outbox temeli geçti |
 | 10 | Local restore smoke | Backup, ayrı hedefe restore, auth/scope ve DB smoke | completed — ayrı rastgele DB'ye pg_dump/pg_restore, migration/RLS/IAM/audit/outbox ve Keycloak auth geçti; cleanup sıfır artıkla doğrulandı |
-| 11 | CI ve temiz kurulum | Belgelenmiş bootstrap/verify ile clean checkout kapısı | validating — bağımsız temiz kaynak bootstrap geçti; ilk remote run kusurları düzeltildi, yeni remote koşu bekliyor |
+| 11 | CI ve temiz kurulum | Belgelenmiş bootstrap/verify ile clean checkout kapısı | completed — clean bootstrap ile run `32360372748` içindeki altı job'ın tamamı geçti |
 
 ## Test planı
 
@@ -222,6 +222,7 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 - `pixel2Api29` x86_64 Gradle managed device tanımlandı. İlk koşu API 29 AOSP sistem imajını lisanslı SDK akışıyla kurdu; 1 Compose semantics instrumentation testi emülatörde geçti. Root verify'ın instrumentation APK derlemesinden ayrı bu koşu `:app:pixel2Api29DebugAndroidTest` göreviyle tekrarlanabilir.
 - Android düzeltmelerinden sonraki full `scripts/verify.ps1` geçti: .NET Release build 0 warning/error, architecture/API contract/safe telemetry, format, web lint/typecheck/2 test/build, gerçek PostgreSQL migration/RLS/IAM/audit/outbox, gerçek Keycloak auth, izole restore ve Android lint/2 JVM testi/instrumentation APK derlemesi başarılıdır. Yerel MP-02 Android blokajı kapanmıştır; yalnız değişikliklerin commit/push edilmesinden sonraki temiz remote CI kanıtı açıktır.
 - Remote CI run `32359676674` içinde clean bootstrap, backend/format, web, Android ve secret scan geçti; database migration/RLS de geçti. Yalnız POSIX restore, executable biti taşımayan `scripts/test-db.sh` dosyasını doğrudan çalıştırdığı için exit 126 aldı. İç çağrı `bash ./scripts/test-db.sh` olarak taşınabilir hale getirildi; Git Bash üzerinde shell parse ve gerçek izole restore/migration/RLS/outbox zinciri geçti. Düzeltme için yeni remote koşu beklenmektedir.
+- Düzeltme commit'i `2f4d4ee` için GitHub Actions run `32360372748` başarıyla tamamlandı. Clean bootstrap, backend build/architecture/format, web lint/typecheck/test/build, Android SDK/lint/unit/instrumentation build, Gitleaks secret scan ve PostgreSQL migration/RLS/izole restore job'larının 6/6'sı geçti; ephemeral database cleanup tamamlandı.
 
 ## Tamamlanma kanıtı
 
@@ -237,6 +238,6 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 - [x] Authenticated scoped örnek ve audit — Keycloak→ERP permission/company scope ve append-only correlation audit geçti.
 - [x] Health/telemetry/outbox temeli — DB readiness, güvenli JSON route telemetry ve transactional duplicate-safe outbox gerçek DB testleri geçti.
 - [x] Local restore smoke — ayrı hedefte migration, DB scope/outbox ve gerçek Keycloak auth geçti; kaynak DB/volume değişmedi ve geçici artık kalmadı.
-- [ ] CI ve temiz kurulum kanıtı — bağımsız yerel temiz bootstrap geçti; run `32229247173` kök nedenleri düzeltildi, ancak yeni remote run henüz yok.
+- [x] CI ve temiz kurulum kanıtı — bağımsız yerel temiz bootstrap ve GitHub Actions run `32360372748` içindeki 6/6 job geçti.
 - [x] Güvenlik/secret/PII incelemesi — tracked kaynak örüntü taraması ve güncel NuGet/pnpm vulnerability sorguları temiz; yeni remote Gitleaks koşusu CI maddesinde bekliyor.
-- [ ] MP-02 çıkış kapısı değerlendirmesi.
+- [ ] MP-02 çıkış kapısı değerlendirmesi — tüm teknik yerel/remote kanıtlar mevcut; MP-01 altındaki isimli teknik, güvenlik ve operasyon sahibi kabulü bekleniyor.

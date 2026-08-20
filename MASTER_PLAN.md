@@ -220,7 +220,7 @@ Aşağıdaki konular bütün fazları keser ve sona bırakılamaz:
 |---|---|---|---|---|
 | MP-00 | Şartname ve yönlendirme tabanı | completed | v1.2 çoklu belge paketi ve master plan | Paket doğrulama kaydı |
 | MP-01 | Firma politikaları ve resmi kararlar | in-progress | Sahipli karar ve açık soru kayıtları | Kritik bilinmeyenlerin sınıflandırılması |
-| MP-02 | Repository ve geliştirme platformu | validating | Çalışan iskelet, CI, local Compose, auth ve DB | Temiz remote CI koşusu |
+| MP-02 | Repository ve geliştirme platformu | validating | Çalışan iskelet, CI, local Compose, auth ve DB | İsimli sahip kabulü ve MP-03 Definition of Ready |
 | MP-03 | Muhasebe çekirdeği ve cari ilk dikey dilim | proposed | Kaynak olaydan rapora uzlaşan uçtan uca akış | Golden senaryo sıfır fark |
 | MP-04 | Stok ve satış çekirdeği | proposed | Sipariş, rezervasyon, sevk, fatura, iade | Miktar ve değer mutabakatı |
 | MP-05 | Satın alma, banka, kasa ve çek/senet | proposed | Kontrollü borç, nakit ve kıymetli evrak akışları | Subledger ve banka mutabakatı |
@@ -277,7 +277,7 @@ Minimum karar seti:
 
 Amaç: Tüm modüllerin üzerinde güvenle büyüyeceği, tek komutla kurulabilen geliştirme tabanı oluşturmak.
 
-Durum kanıtı (20 Ağustos 2026): bağımsız repository, .NET solution, strict web workspace, Android scaffold ve yerel CI sözleşmesi oluşturuldu. JDK 17, Android Studio/SDK ve Docker/WSL 2 doğrulandı; Android lint/unit/instrumentation derleme ile API 29 managed-emulator Compose testi, PostgreSQL/Keycloak Compose health, boş ve örnek verili migration, DB/RLS negatifleri, deny-by-default API tenant/company scope, correlation zincirli append-only authorization audit, DB-backed readiness, güvenli structured telemetry, transactional duplicate-safe outbox, gerçek Keycloak subject→ERP DB üyelik/şirket/permission, ayrı hedefe local restore smoke ve servis açmayan temiz kaynak bootstrap testleri geçti. İlk CI loglarındaki Linux path, internal Compose ağı, Android SDK komut yolu ve ephemeral secret masking kusurları yerelde düzeltildi. Değişiklikler yayımlandıktan sonraki temiz remote CI koşusu açıktır. Ayrıntı ve komut kanıtı [MP-02 yaşayan görev planındadır](docs/project/plans/2026-08-19-repository-bootstrap.md).
+Durum kanıtı (20 Ağustos 2026): bağımsız repository, .NET solution, strict web workspace, Android scaffold ve CI sözleşmesi oluşturuldu. JDK 17, Android Studio/SDK ve Docker/WSL 2 doğrulandı; Android lint/unit/instrumentation derleme ile API 29 managed-emulator Compose testi, PostgreSQL/Keycloak Compose health, boş ve örnek verili migration, DB/RLS negatifleri, deny-by-default API tenant/company scope, correlation zincirli append-only authorization audit, DB-backed readiness, güvenli structured telemetry, transactional duplicate-safe outbox, gerçek Keycloak subject→ERP DB üyelik/şirket/permission, ayrı hedefe local restore smoke ve servis açmayan temiz kaynak bootstrap testleri geçti. İlk CI loglarındaki Linux path, internal Compose ağı, Android SDK komut yolu, POSIX nested-script çalıştırma ve ephemeral secret masking kusurları düzeltildi. Commit `2f4d4ee` için GitHub Actions run `32360372748` içindeki clean bootstrap, backend/format, web, Android, secret scan ve PostgreSQL migration/RLS/restore job'larının 6/6'sı geçti. Ayrıntı ve komut kanıtı [MP-02 yaşayan görev planındadır](docs/project/plans/2026-08-19-repository-bootstrap.md).
 
 Teslimatlar:
 
