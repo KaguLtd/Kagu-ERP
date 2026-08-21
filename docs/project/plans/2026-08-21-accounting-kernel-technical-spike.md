@@ -3,7 +3,7 @@
 - **Amaç:** Firma ve KKTC muhasebe politikalarını varsaymadan, dengeli ve değişmez journal taslağı invariantını çalışır kod ve otomatik testle kanıtlamak.
 - **Master fazı ve kapısı:** MP-03 / business implementation öncesi politika bağımsız teknik spike.
 - **Risk sınıfı:** R4 — finansal çekirdeğe temas eder; gerçek posting, hesap planı ve production davranışı kapsam dışıdır.
-- **Durum:** validating
+- **Durum:** completed
 - **Sahip:** Roller `DEC-MP01-019` gereği atanmadı; kullanıcı teknik ilerlemeyi onayladı.
 - **Başlangıç / hedef tarih:** 2026-08-21 / ilk invariant dilimi aynı çalışma içinde.
 - **İlgili requirement ID'leri:** ACC-INV-001, ACC-INV-002, DATA para/tarih/değişmezlik standartları.
@@ -60,7 +60,7 @@ MP-02 teknik platformu tamamlanmıştır. Bu plan MP-03 fazını production/busi
 | 1 | Accounting module/domain sınırı | Solution ve architecture check yeni projeyi doğru katmanda görür | completed |
 | 2 | Decimal journal satırı invariantı | Negatif, çift taraflı ve boş satır boundary testleri | completed |
 | 3 | Dengeli immutable journal draft | Balanced/imbalanced, scope/source/time/currency ve mutation testleri | completed |
-| 4 | Root ve CI kapısı | Domain unit harness, Release build, format ve architecture geçer | validating — tam yerel root verify geçti; remote CI bekliyor |
+| 4 | Root ve CI kapısı | Domain unit harness, Release build, format ve architecture geçer | completed — tam yerel root verify ve remote CI 6/6 geçti |
 
 ## Test planı
 
@@ -89,6 +89,7 @@ MP-02 teknik platformu tamamlanmıştır. Bu plan MP-03 fazını production/busi
 - Windows PowerShell yerel `.env` okuması `ConvertFrom-StringData` ile güvenilir hale getirildi; HTTP Problem Details ve JDK stderr sürüm çıktısı PowerShell 5 uyumlu işlendi.
 - `scripts/verify.ps1` eksiksiz geçti: locked restore, Release build/format, domain ve architecture checks, web lint/typecheck/test/build, PostgreSQL migration/RLS, Keycloak auth/audit, izole restore ve Android lint/unit/instrumentation APK derlemesi başarılıdır.
 - İlk PR koşusunda beş teknik job geçti; Gitleaks bulgu üretmeden PR commit API'sinde `403` aldı. Workflow tokenına yalnız gerekli `pull-requests: read` izni eklendi; yazma izni verilmedi.
+- Commit `c1c8f03` için GitHub Actions run `32455701366` içindeki clean bootstrap, backend/domain+architecture, web, Android, PostgreSQL/RLS/restore ve secret scan job'larının 6/6'sı geçti. Taslak PR: `#8`.
 
 ## Tamamlanma kanıtı
 
@@ -96,6 +97,6 @@ MP-02 teknik platformu tamamlanmıştır. Bu plan MP-03 fazını production/busi
 - [x] Immutable doğrulanmış journal draft dış mutation kabul etmez.
 - [x] Release build, format ve architecture check geçer.
 - [x] Root verify domain unit harness'i ve tüm yerel kapıları çalıştırır.
-- [ ] Remote CI domain unit harness'i çalıştırır.
+- [x] Remote CI domain unit harness'i çalıştırır.
 - [ ] Açık business kararları kod içine sabitlenmemiştir.
 - [ ] Plan günlüğü ve master etkisi günceldir.
