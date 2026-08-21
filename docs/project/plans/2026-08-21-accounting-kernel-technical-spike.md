@@ -88,6 +88,7 @@ MP-02 teknik platformu tamamlanmıştır. Bu plan MP-03 fazını production/busi
 - Release build 0 uyarı/0 hata ile geçti. 8 domain check ve 9 source project architecture check başarılı oldu; `dotnet format --verify-no-changes` temizdir.
 - Windows PowerShell yerel `.env` okuması `ConvertFrom-StringData` ile güvenilir hale getirildi; HTTP Problem Details ve JDK stderr sürüm çıktısı PowerShell 5 uyumlu işlendi.
 - `scripts/verify.ps1` eksiksiz geçti: locked restore, Release build/format, domain ve architecture checks, web lint/typecheck/test/build, PostgreSQL migration/RLS, Keycloak auth/audit, izole restore ve Android lint/unit/instrumentation APK derlemesi başarılıdır.
+- İlk PR koşusunda beş teknik job geçti; Gitleaks bulgu üretmeden PR commit API'sinde `403` aldı. Workflow tokenına yalnız gerekli `pull-requests: read` izni eklendi; yazma izni verilmedi.
 
 ## Tamamlanma kanıtı
 
