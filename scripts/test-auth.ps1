@@ -17,7 +17,29 @@ function Invoke-ProtectedEndpoint {
         return [pscustomobject]@{ Status = 200; Code = ''; Body = ($response.Content | ConvertFrom-Json) }
     } catch {
         $status = [int]$_.Exception.Response.StatusCode
-        $problem = $_.ErrorDetails.Message | ConvertFrom-Json
+        $problemJson = $null
+        $messageProperty = if ($null -eq $_.ErrorDetails) {
+            $null
+        } else {
+            $_.ErrorDetails.PSObject.Properties['Message']
+        }
+        if ($null -ne $messageProperty) {
+            $problemJson = [string]$messageProperty.Value
+        }
+
+        if ([string]::IsNullOrWhiteSpace($problemJson)) {
+            $responseStream = $_.Exception.Response.GetResponseStream()
+            if ($null -ne $responseStream) {
+                $reader = [System.IO.StreamReader]::new($responseStream)
+                try {
+                    $problemJson = $reader.ReadToEnd()
+                } finally {
+                    $reader.Dispose()
+                }
+            }
+        }
+
+        $problem = $problemJson | ConvertFrom-Json
         return [pscustomobject]@{ Status = $status; Code = $problem.code; Body = $null }
     }
 }
@@ -39,27 +61,23 @@ function Read-JwtPayload {
     return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded)) | ConvertFrom-Json
 }
 
-$settings = @{}
-foreach ($line in Get-Content -LiteralPath $environmentPath) {
-    if ($line -match '^([A-Z][A-Z0-9_]*)=(.*)$') {
-        $name = $Matches[1]
-        $value = $Matches[2]
-        $settings[$name] = $value
-    }
-}
+$settings = ConvertFrom-StringData (Get-Content -LiteralPath $environmentPath -Raw)
 
 function Get-LocalSetting {
-    param([Parameter(Mandatory = $true)][string] $Name)
+    param([Parameter(Mandatory = $true)][string] $SettingName)
 
-    $processValue = [Environment]::GetEnvironmentVariable($Name)
+    $processValue = [Environment]::GetEnvironmentVariable($SettingName)
     if (-not [string]::IsNullOrWhiteSpace($processValue)) {
         return $processValue
     }
 
-    return $settings[$Name]
+    return $settings[$SettingName]
 }
 
-$smokePassword = Get-LocalSetting 'KAGU_KEYCLOAK_SMOKE_PASSWORD'
+$smokePassword = [Environment]::GetEnvironmentVariable('KAGU_KEYCLOAK_SMOKE_PASSWORD')
+if ([string]::IsNullOrWhiteSpace($smokePassword)) {
+    $smokePassword = $settings['KAGU_KEYCLOAK_SMOKE_PASSWORD']
+}
 if ([string]::IsNullOrWhiteSpace($smokePassword)) {
     throw 'KAGU_KEYCLOAK_SMOKE_PASSWORD is missing. Run scripts/bootstrap.ps1.'
 }

@@ -3,27 +3,10 @@ Set-StrictMode -Version Latest
 
 $repositoryRoot = Split-Path $PSScriptRoot -Parent
 $environmentPath = Join-Path $repositoryRoot '.env'
-$localSettings = @{}
-if (Test-Path -LiteralPath $environmentPath) {
-    foreach ($line in Get-Content -LiteralPath $environmentPath) {
-        if ($line -match '^([A-Z][A-Z0-9_]*)=(.*)$') {
-            $name = $Matches[1]
-            $value = $Matches[2]
-            $localSettings[$name] = $value
-        }
-    }
-
-}
-
-function Get-LocalSetting {
-    param([Parameter(Mandatory = $true)][string] $Name)
-
-    $processValue = [Environment]::GetEnvironmentVariable($Name)
-    if (-not [string]::IsNullOrWhiteSpace($processValue)) {
-        return $processValue
-    }
-
-    return $localSettings[$Name]
+$localSettings = if (Test-Path -LiteralPath $environmentPath) {
+    ConvertFrom-StringData (Get-Content -LiteralPath $environmentPath -Raw)
+} else {
+    @{}
 }
 
 $required = @(
@@ -33,21 +16,33 @@ $required = @(
     'KAGU_ERP_APP_USER',
     'KAGU_ERP_APP_PASSWORD'
 )
-foreach ($name in $required) {
-    if ([string]::IsNullOrWhiteSpace((Get-LocalSetting $name))) {
-        throw "Required local setting $name is missing."
+$resolvedSettings = @{}
+foreach ($requiredSetting in $required) {
+    $processValue = [Environment]::GetEnvironmentVariable($requiredSetting)
+    $resolvedValue = if ([string]::IsNullOrWhiteSpace($processValue)) {
+        $localSettings[$requiredSetting]
+    } else {
+        $processValue
     }
+
+    if ([string]::IsNullOrWhiteSpace($resolvedValue)) {
+        throw "Required local setting $requiredSetting is missing."
+    }
+
+    $resolvedSettings[$requiredSetting] = $resolvedValue
 }
 
-$database = Get-LocalSetting 'KAGU_ERP_POSTGRES_DB'
-$databaseHost = Get-LocalSetting 'KAGU_ERP_POSTGRES_HOST'
+$database = $resolvedSettings['KAGU_ERP_POSTGRES_DB']
+$databaseHost = [Environment]::GetEnvironmentVariable('KAGU_ERP_POSTGRES_HOST')
+if ([string]::IsNullOrWhiteSpace($databaseHost)) { $databaseHost = $localSettings['KAGU_ERP_POSTGRES_HOST'] }
 if ([string]::IsNullOrWhiteSpace($databaseHost)) { $databaseHost = '127.0.0.1' }
-$databasePort = Get-LocalSetting 'KAGU_ERP_POSTGRES_PORT'
+$databasePort = [Environment]::GetEnvironmentVariable('KAGU_ERP_POSTGRES_PORT')
+if ([string]::IsNullOrWhiteSpace($databasePort)) { $databasePort = $localSettings['KAGU_ERP_POSTGRES_PORT'] }
 if ([string]::IsNullOrWhiteSpace($databasePort)) { $databasePort = '55432' }
-$migratorUser = Get-LocalSetting 'KAGU_ERP_MIGRATOR_USER'
-$migratorPassword = Get-LocalSetting 'KAGU_ERP_MIGRATOR_PASSWORD'
-$appUser = Get-LocalSetting 'KAGU_ERP_APP_USER'
-$appPassword = Get-LocalSetting 'KAGU_ERP_APP_PASSWORD'
+$migratorUser = $resolvedSettings['KAGU_ERP_MIGRATOR_USER']
+$migratorPassword = $resolvedSettings['KAGU_ERP_MIGRATOR_PASSWORD']
+$appUser = $resolvedSettings['KAGU_ERP_APP_USER']
+$appPassword = $resolvedSettings['KAGU_ERP_APP_PASSWORD']
 
 $common = "Host=$databaseHost;Port=$databasePort;Database=$database;Pooling=true;Include Error Detail=false"
 $env:KAGU_ERP_MIGRATOR_CONNECTION_STRING = "$common;Username=$migratorUser;Password=$migratorPassword;Application Name=KaguERP.Migrator"

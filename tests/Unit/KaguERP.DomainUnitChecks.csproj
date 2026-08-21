@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Modules\Accounting\Accounting.Domain\KaguERP.Modules.Accounting.Domain.csproj" />
+  </ItemGroup>
+</Project>

@@ -58,6 +58,7 @@ Secret, credential, gerçek kişisel veri, tam VKN/IBAN veya hassas kurum cevab�
 | DEC-MP01-016 | Banka formatları, ödeme entegrasyonu, credential ve mutabakat yetkileri | Finans + güvenlik | open | Banka entegrasyonu/production | Fake provider ve örnek sentetik dosya parser contract |
 | DEC-MP01-017 | RPO, RTO, backup lokasyonu, bakım penceresi ve on-call | Operasyon + ürün | open | MP-02 çıkış kapısının restore hedefi ve production | Local restore smoke; hedefler şartnamedeki öneri olarak etiketli |
 | DEC-MP01-018 | Git repository sınırı: bağımsız `Kagu ERP` repository'si veya üst monorepo | Teknik + ürün | approved | — | Bağımsız repository, `main` dalı ve GitHub `origin` doğrulandı |
+| DEC-MP01-019 | İsimli proje sahiplerinin atanma zamanı | Kullanıcı/repository sahibi | approved | Production ve uzman kabulü | Roller `atanmadı` kalır; yalnız politika bağımsız teknik spike ilerler |
 
 ### DEC-MP01-018 — Bağımsız Git repository sınırı
 
@@ -77,11 +78,29 @@ affected_requirements: [ARCH, OPS, REL]
 notes: "Yerel repository 2026-08-19 tarihinde main dalıyla başlatıldı; commit veya push bu karar kaydı sırasında yapılmadı."
 ```
 
+### DEC-MP01-019 — İsimli sahip atamasını erteleme
+
+```yaml
+decision_id: DEC-MP01-019
+title: "İsimli proje sahiplerinin atanma zamanı"
+status: approved
+authority: "KaguLtd repository sahibi — bu görevdeki kullanıcı talimatı"
+owner_role: "Kullanıcı/repository sahibi"
+owner_name: "İsim verilmedi"
+decision: "Ürün, teknik, muhasebe, güvenlik/veri ve operasyon rolleri şimdilik atanmadı kalacak; geliştirme sonuna doğru yeniden değerlendirilecek."
+source_or_evidence: "2026-08-21 kullanıcı talimatı"
+effective_from: 2026-08-21
+review_due: 2027-06-30
+blocks: [production, MP-03-business-acceptance]
+affected_requirements: [GL, IAM, SEC, OPS, DR, REL]
+notes: "Karar yalnız geri döndürülebilir ve politika bağımsız teknik geliştirmeyi serbest bırakır. Gerçek muhasebe, vergi, yetki, RPO/RTO veya production kabulü değildir."
+```
+
 ## 4. Definition of Ready özeti
 
 ### MP-02 — Repository ve geliştirme platformu
 
-**Sonuç: technical-pass / organizational acceptance pending.** Aşağıdaki geri döndürülebilir işler firma kararları beklerken tamamlandı:
+**Sonuç: pass for technical platform.** Aşağıdaki geri döndürülebilir işler firma kararları beklerken tamamlandı:
 
 - bağımsız repository sınırı onaylandıktan sonra solution/klasör iskeleti;
 - SDK/package version pinleme, format/lint/analyzers ve temel CI;
@@ -90,7 +109,7 @@ notes: "Yerel repository 2026-08-19 tarihinde main dalıyla başlatıldı; commi
 - tenant/company/RLS spike; bunun nihai firma topolojisi olmadığı açıkça belirtilir;
 - local backup/restore smoke.
 
-Repository sınırı `DEC-MP01-018` ile çözülmüştür. MP-02 teknik kapıları commit `2f4d4ee` için GitHub Actions run `32360372748` dahil yerel ve remote kanıtlarla geçmiştir. Fazın kurumsal kabulü için isimli teknik/güvenlik/operasyon sahipleri ile `DEC-MP01-017` production hedefleri hâlâ gereklidir. Dış servis, uzak backup veya gerçek veri için ilgili diğer kararlar yine gereklidir.
+Repository sınırı `DEC-MP01-018` ile çözülmüştür. MP-02 teknik kapıları commit `2f4d4ee` için GitHub Actions run `32360372748` dahil yerel ve remote kanıtlarla geçmiştir. Kullanıcı `DEC-MP01-019` ile isimli sahip atamasını geliştirme sonuna erteleyerek teknik faz kapanışını kabul etmiştir. `DEC-MP01-017` production hedefleri, dış servis, uzak backup ve gerçek veri için hâlâ zorunludur.
 
 ### MP-03 — Muhasebe çekirdeği ve cari ilk dikey dilim
 

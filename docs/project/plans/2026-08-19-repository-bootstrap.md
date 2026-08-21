@@ -3,8 +3,8 @@
 - **Amaç:** Kagu ERP için bağımsız, temiz ortamda kurulabilir, sürümleri sabitlenmiş ve güvenlik sınırları tanımlı monorepo geliştirme tabanı oluşturmak.
 - **Master fazı ve kapısı:** MP-02 / temiz kurulum, CI, scoped auth örneği, migration ve restore smoke çıkış kapısı.
 - **Risk sınıfı:** R3 — auth/tenant, PostgreSQL/RLS, migration, secret ve backup/restore içerir.
-- **Durum:** validating
-- **Sahip:** Teknik lider, güvenlik/veri sorumlusu ve operasyon sorumlusu; isim atamaları MP-01 içinde bekleniyor.
+- **Durum:** completed
+- **Sahip:** Roller `DEC-MP01-019` gereği atanmadı; isim atamaları geliştirme sonunda yeniden değerlendirilecek.
 - **Başlangıç / hedef tarih:** 2026-08-19 / isimli sahip ve kapasite doğrulamasından sonra belirlenecek.
 - **İlgili requirement ID'leri:** ARCH-001–011, API-001–010 ve MP-02 çıkış kapısı; IAM/DATA/SEC/OPS/DR requirement aileleri.
 - **Etkilenen belgeler/modüller:** Repository, backend, web, Android, PostgreSQL, Keycloak, CI, gözlemlenebilirlik ve local restore.
@@ -105,7 +105,7 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 |---|---|---|---|
 | 2026-08-19 | Repository başlangıçta üst Git kökünün altındaydı | Kardeş proje kapsam riski | `DEC-MP01-018` ile bağımsız repo oluşturuldu |
 | 2026-08-19 | GitHub remote başlangıçta boştu | Geçmiş/branch conflict olmadan `main` başlatılabildi | `71c8faf` ilk bootstrap commit'i olarak pushlandı; CI run `32229247173` oluşturuldu |
-| 2026-08-19 | İsimli teknik/güvenlik/ops sahipleri yok | MP-02 çıkış kabulü tamamlanamaz | MP-01 içinde atanacak |
+| 2026-08-21 | İsimli teknik/güvenlik/ops sahipleri yok | Production ve uzman kabulü yapılamaz | Kullanıcı `DEC-MP01-019` ile atamayı geliştirme sonuna erteledi; teknik MP-02 kapanışı kabul edildi |
 | 2026-08-19 | Yerel Node.js 24.15.0 ve pnpm 11.19.0, hedef 24.19.0 ve 11.22.0'ın gerisinde | Temiz kurulum hedef sürümleri ayrıca indirmeli | Hedefler resmi sürüm kaynaklarıyla sabitlendi; mevcut sürümler uyumluluk aralığında |
 | 2026-08-20 | Android Studio 2026.1.3 kuruldu; ilk wizard API 37.1 sistem imajını bulamadı | IDE mevcut olsa da SDK/cihaz testi başlangıçta eksikti | Varsayılan SDK keşfedildi; platform 37.0/build-tools 36.0.0 doğrulandı, API 29 x86_64 Gradle managed device ile gerçek Compose testi geçti |
 | 2026-08-20 | Compose `internal` ağı Windows host port yayınını işlevsiz bıraktı | Container'lar healthy olsa da ERP DB ve Keycloak host'tan erişilemiyordu | Ağ bridge olarak tanımlandı; yalnız ERP DB `127.0.0.1:55432` ve Keycloak `127.0.0.1:58080` yayınlanır, Keycloak DB host'a kapalı kalır |
@@ -240,4 +240,4 @@ MP-01 paralel açık kalır. Firma topolojisi için atılabilir çok-company mod
 - [x] Local restore smoke — ayrı hedefte migration, DB scope/outbox ve gerçek Keycloak auth geçti; kaynak DB/volume değişmedi ve geçici artık kalmadı.
 - [x] CI ve temiz kurulum kanıtı — bağımsız yerel temiz bootstrap ve GitHub Actions run `32360372748` içindeki 6/6 job geçti.
 - [x] Güvenlik/secret/PII incelemesi — tracked kaynak örüntü taraması ve güncel NuGet/pnpm vulnerability sorguları temiz; yeni remote Gitleaks koşusu CI maddesinde bekliyor.
-- [ ] MP-02 çıkış kapısı değerlendirmesi — tüm teknik yerel/remote kanıtlar mevcut; MP-01 altındaki isimli teknik, güvenlik ve operasyon sahibi kabulü bekleniyor.
+- [x] MP-02 çıkış kapısı değerlendirmesi — tüm teknik yerel/remote kanıtlar mevcut; kullanıcı `DEC-MP01-019` ile isimli atamaları erteleyip teknik kapanışı kabul etti. Production/uzman kabulü kapsam dışıdır.

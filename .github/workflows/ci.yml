@@ -69,6 +69,9 @@ jobs:
       - name: Build
         run: dotnet build KaguERP.slnx --configuration Release --no-restore
 
+      - name: Run domain unit checks
+        run: dotnet tests/Unit/bin/Release/net10.0/KaguERP.DomainUnitChecks.dll
+
       - name: Check architecture
         run: dotnet run --project tests/Architecture/KaguERP.ArchitectureChecks.csproj --configuration Release --no-build
 

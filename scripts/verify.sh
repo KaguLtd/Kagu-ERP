@@ -3,6 +3,7 @@ set -euo pipefail
 
 dotnet restore KaguERP.slnx --locked-mode
 dotnet build KaguERP.slnx --configuration Release --no-restore
+dotnet tests/Unit/bin/Release/net10.0/KaguERP.DomainUnitChecks.dll
 dotnet tests/Architecture/bin/Release/net10.0/KaguERP.ArchitectureChecks.dll
 dotnet format KaguERP.slnx --no-restore --verify-no-changes --verbosity minimal
 

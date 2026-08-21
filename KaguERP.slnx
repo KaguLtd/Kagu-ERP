@@ -25,8 +25,14 @@
   <Folder Name="/src/Erp.Worker/">
     <Project Path="src/Erp.Worker/KaguERP.Worker.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Accounting/Accounting.Domain/">
+    <Project Path="src/Modules/Accounting/Accounting.Domain/KaguERP.Modules.Accounting.Domain.csproj" />
+  </Folder>
   <Folder Name="/tests/" />
   <Folder Name="/tests/Architecture/">
     <Project Path="tests/Architecture/KaguERP.ArchitectureChecks.csproj" />
+  </Folder>
+  <Folder Name="/tests/Unit/">
+    <Project Path="tests/Unit/KaguERP.DomainUnitChecks.csproj" />
   </Folder>
 </Solution>

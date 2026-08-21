@@ -4,7 +4,7 @@
 - **Master fazı ve kapısı:** MP-01 / kritik bilinmeyenlerin sınıflandırılması ve MP-02–MP-03 Definition of Ready değerlendirmesi.
 - **Risk sınıfı:** R4 — mevzuat, kişisel veri, finansal politika ve ileride production davranışını etkileyen kararlar.
 - **Durum:** in-progress
-- **Sahip:** Ürün sahibi, teknik lider, yetkili mali müşavir/muhasip, güvenlik/veri sorumlusu ve operasyon sorumlusu. İsim atamaları bekleniyor.
+- **Sahip:** Roller `DEC-MP01-019` gereği atanmadı; isim atamaları geliştirme sonunda yeniden değerlendirilecek.
 - **Başlangıç / hedef tarih:** 2026-08-19 / sahip ve hedef tarihler atandıktan sonra belirlenecek.
 - **İlgili requirement aileleri:** ARCH, DATA, IAM, ORG, PARTY, INV, TRY, INS, GL, TAX, EINV, WF, SEC, OPS, DR, REL.
 - **Etkilenen belgeler/modüller:** Organizasyon, IAM, muhasebe, cari, stok, banka, iş akışı, vergi/e-Fatura, güvenlik, operasyon ve restore.
@@ -78,10 +78,10 @@ Blokaj etkisi karar bazında ayrıca yazılır:
 | 1 | Karar kayıt şeması ve başlangıç matrisi | Tüm MP-01 minimum karar alanları kimlik, sahip rolü, durum ve blokaj taşır | completed |
 | 2 | Resmi/hukuki sınıflandırma | Her soru grubu feature/production etkisi ve güvenli paralel iş sınırı taşır | completed |
 | 3 | Repository sınırı kararı | Bağımsız repository, `main` dalı ve GitHub `origin` doğrulanmıştır | completed |
-| 4 | İsimli sahip ataması | Ürün, teknik, muhasebe, güvenlik/veri ve operasyon sorumluları kayıtlıdır | pending |
+| 4 | İsimli sahip ataması | Ürün, teknik, muhasebe, güvenlik/veri ve operasyon sorumluları kayıtlıdır | pending — `DEC-MP01-019` ile geliştirme sonuna ertelendi |
 | 5 | Firma topolojisi ve temel politikalar | Tenant/company/branch/period/currency/approval kararları kanıtlıdır | pending |
 | 6 | Finansal çekirdek politikaları | Hesap planı, allocation, kur/yuvarlama, kilit ve kontrol hesabı kararları onaylıdır | pending |
-| 7 | MP-02 ve MP-03 DoR değerlendirmesi | Her eksik madde owner/date ve açık blokajla raporlanır | in-progress — MP-02 teknik pass; kurumsal sahip kabulü ve MP-03 finansal kararları bekliyor |
+| 7 | MP-02 ve MP-03 DoR değerlendirmesi | Her eksik madde owner/date ve açık blokajla raporlanır | in-progress — MP-02 teknik final pass; MP-03 yalnız politika bağımsız spike, business kararları bekliyor |
 
 ## Test planı
 
@@ -99,6 +99,7 @@ Blokaj etkisi karar bazında ayrıca yazılır:
 | 2026-08-19 | Git kökü başlangıçta proje üst klasöründeydi | `DEC-MP01-018` ile bağımsız repository oluşturularak risk giderildi | Yetkili kullanıcı; isimli teknik/ürün sahibi teyidi bekliyor |
 | 2026-08-19 | Resmi ve finansal kararların çoğu açık | Gerçek vergi/e-Fatura, GL, stok ve production davranışı etkinleşemez | İlgili kurum/uzman/firma sahibi |
 | 2026-08-19 | Teknik temel geri döndürülebilir biçimde kurulabilir | MP-01 cevapları beklerken MP-02'nin sınırlı işleri ilerleyebilir | Master planın paralel ilerleme kuralı |
+| 2026-08-21 | Kullanıcı isimli sahipleri geliştirme sonuna erteledi | MP-01 çıkış kapısı, production ve uzman mali kabulü bloklu kalır | `DEC-MP01-019`; yalnız politika bağımsız ve geri döndürülebilir teknik işler ilerler |
 
 ## İlerleme günlüğü
 
@@ -119,6 +120,12 @@ Blokaj etkisi karar bazında ayrıca yazılır:
 - MP-02 kurumsal kapanışı, isimli teknik/güvenlik/operasyon sahipleri ve `DEC-MP01-017` production RPO/RTO kabulü olmadan tamamlanmış sayılmadı.
 - MP-03 Definition of Ready sonucu değişmedi: `DEC-MP01-001`–`010`, `012` ve ilgili isimli sahipler onaylanmadan gerçek accounting-kernel davranışı blokludur.
 - Sıradaki kesin adım: beş sorumlu rol için isim ataması ve karar başına hedef tarih kaydıdır.
+
+### 2026-08-21
+
+- Kullanıcı, beş sorumlu rolün şimdilik `atanmadı` kalmasını ve geliştirme sonunda yeniden değerlendirilmesini istedi; karar `DEC-MP01-019` olarak kaydedildi.
+- MP-02 teknik çıkış kapısı tamamlandı. İsim eksikliği artık MP-02 teknik kapanışını geri açmaz; production ve uzman kabulünü bloklamaya devam eder.
+- MP-03 business implementation için `DEC-MP01-001`–`010` ve `012` blokajları korunurken, decimal ve dengeli journal gibi politika bağımsız invariantları kapsayan teknik spike başlatıldı.
 
 ## Tamamlanma kanıtı
 

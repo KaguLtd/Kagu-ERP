@@ -37,6 +37,8 @@ dotnet restore KaguERP.slnx --locked-mode
 if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed with exit code $LASTEXITCODE." }
 dotnet build KaguERP.slnx --configuration Release --no-restore
 if ($LASTEXITCODE -ne 0) { throw "dotnet build failed with exit code $LASTEXITCODE." }
+dotnet tests/Unit/bin/Release/net10.0/KaguERP.DomainUnitChecks.dll
+if ($LASTEXITCODE -ne 0) { throw "domain unit checks failed with exit code $LASTEXITCODE." }
 dotnet tests/Architecture/bin/Release/net10.0/KaguERP.ArchitectureChecks.dll
 if ($LASTEXITCODE -ne 0) { throw "architecture checks failed with exit code $LASTEXITCODE." }
 dotnet format KaguERP.slnx --no-restore --verify-no-changes --verbosity minimal
@@ -80,7 +82,15 @@ $androidSdk = Find-AndroidSdk
 if ($null -eq $javaCommand -or [string]::IsNullOrWhiteSpace($androidSdk)) {
     Write-Warning 'Android lint/unit/instrumentation build skipped: JDK 17 and Android SDK are required. This is not a passing Android result.'
 } else {
-    $javaVersion = (& $javaCommand.Source -version 2>&1 | Select-Object -First 1).ToString()
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $javaVersionOutput = & $javaCommand.Source -version 2>&1
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($LASTEXITCODE -ne 0) { throw "java -version failed with exit code $LASTEXITCODE." }
+    $javaVersion = ($javaVersionOutput | Select-Object -First 1).ToString()
     if ($javaVersion -notmatch 'version "17(?:[.]|"|$)') {
         throw "Android verification requires JDK 17; active Java is: $javaVersion"
     }
