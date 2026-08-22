@@ -4,6 +4,9 @@
     "net10.0": {
       "kaguerp.modules.accounting.domain": {
         "type": "Project"
+      },
+      "kaguerp.modules.parties.domain": {
+        "type": "Project"
       }
     }
   }
