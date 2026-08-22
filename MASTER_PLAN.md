@@ -305,7 +305,7 @@ Teslimatlar:
 
 Amaç: ERP'nin en kritik doğruluk zincirini küçük bir uçtan uca senaryoda kanıtlamak.
 
-Teknik spike durumu (22 Ağustos 2026): `DEC-MP01-019` sınırında, gerçek posting veya firma politikası üretmeyen ilk saf domain dilimi tamamlandı. Decimal journal satırı, tenant/company/source/rule-version bağlamı, effective/recorded tarih ayrımı, immutable doğrulanmış taslak ve tam borç=alacak invariantı [ilk yaşayan görev planında](docs/project/plans/2026-08-21-accounting-kernel-technical-spike.md) kanıtlıdır. ACC-INV-005 için canonical source identity ve in-memory duplicate journal intent kontrolü [ikinci teknik spike planında](docs/project/plans/2026-08-22-accounting-source-uniqueness-spike.md) ilerlemektedir; PostgreSQL unique index ve production concurrency garantisi kapsam dışıdır. Bu çalışmalar MP-03 giriş kapısını geçmiş veya fazı business implementation için başlatmış sayılmaz.
+Teknik spike durumu (22 Ağustos 2026): `DEC-MP01-019` sınırında, gerçek posting veya firma politikası üretmeyen iki saf domain dilimi tamamlandı. Decimal journal satırı, tenant/company/source/rule-version bağlamı, effective/recorded tarih ayrımı, immutable doğrulanmış taslak ve tam borç=alacak invariantı [ilk yaşayan görev planında](docs/project/plans/2026-08-21-accounting-kernel-technical-spike.md) kanıtlıdır. ACC-INV-005 için canonical source identity ve in-memory duplicate journal intent kontrolü [ikinci teknik spike planında](docs/project/plans/2026-08-22-accounting-source-uniqueness-spike.md) kanıtlıdır; PostgreSQL unique index ve production concurrency garantisi kapsam dışıdır. Bu çalışmalar MP-03 giriş kapısını geçmiş veya fazı business implementation için başlatmış sayılmaz.
 
 Uygulama sırası:
 

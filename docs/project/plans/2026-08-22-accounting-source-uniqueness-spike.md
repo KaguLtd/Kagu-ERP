@@ -3,7 +3,7 @@
 - **Amaç:** Firma muhasebe politikası veya persistence davranışı varsaymadan, bir kaynak olayın aynı şirket ve posting amacı için canonical kimliğini üretmek ve aynı doğrulama kümesindeki duplicate journal niyetini reddetmek.
 - **Master fazı ve kapısı:** MP-03 / business implementation öncesi politika bağımsız ACC-INV-005 spike.
 - **Risk sınıfı:** R4 — finansal idempotency sınırına temas eder; gerçek posting, DB uniqueness ve concurrency garantisi kapsam dışıdır.
-- **Durum:** validating
+- **Durum:** completed
 - **Sahip:** Roller `DEC-MP01-019` gereği atanmadı; kullanıcı politika bağımsız teknik ilerlemeyi onayladı.
 - **Başlangıç / hedef tarih:** 2026-08-22 / ilk source-identity dilimi aynı çalışma içinde.
 - **İlgili requirement ID'leri:** ACC-INV-005, DATA muhasebe constraintleri ve idempotency test standardı.
@@ -49,7 +49,7 @@ Bu plan, tamamlanan dengeli journal draft spike'ının ardından ACC-INV-005 iç
 | 1 | Canonical posting identity | Scope/source/purpose boundary ve equality kontrolleri | completed |
 | 2 | Duplicate draft set kontrolü | Aynı identity ret; farklı company/purpose kabul | completed |
 | 3 | Immutability ve regresyon | Input mutation etkisiz; ACC-INV-001 kontrolleri yeşil | completed |
-| 4 | Root ve CI kapısı | Tam yerel verify ve remote CI | validating — yerel geçti; remote CI bekliyor |
+| 4 | Root ve CI kapısı | Tam yerel verify ve remote CI | completed — yerel ve remote 6/6 geçti |
 
 ## Test planı
 
@@ -76,6 +76,7 @@ Bu plan, tamamlanan dengeli journal draft spike'ının ardından ACC-INV-005 iç
 - `JournalPostingIdentity`, doğrulanmış draft identity bağı ve immutable `ValidatedJournalDraftSet` uygulandı.
 - Domain kontrolleri 8'den 11'e çıktı; canonical equality, duplicate rejection, company/purpose ayrımı ve collection immutability geçti.
 - Tam `scripts/verify.ps1` kapısı geçti: Release build/format, domain/architecture, web, PostgreSQL/RLS, Keycloak auth/audit, izole restore ve Android lint/unit/instrumentation APK derlemesi başarılıdır.
+- Commit `9c70a9f` için GitHub Actions run `32554991692` içindeki clean bootstrap, backend/domain+architecture, web, Android, PostgreSQL/RLS/restore ve secret scan job'larının 6/6'sı geçti.
 
 ## Tamamlanma kanıtı
 
@@ -84,5 +85,5 @@ Bu plan, tamamlanan dengeli journal draft spike'ının ardından ACC-INV-005 iç
 - [x] Kümeye dış mutation yapılamaz.
 - [x] Önceki ACC-INV-001 regresyon kontrolleri geçer.
 - [x] Tam yerel verify geçer.
-- [ ] Remote CI geçer.
+- [x] Remote CI geçer.
 - [x] Plan ve master teknik durum notu günceldir.
