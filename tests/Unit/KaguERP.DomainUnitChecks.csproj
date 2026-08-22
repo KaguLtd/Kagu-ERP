@@ -4,5 +4,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Modules\Accounting\Accounting.Domain\KaguERP.Modules.Accounting.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Parties\Parties.Domain\KaguERP.Modules.Parties.Domain.csproj" />
   </ItemGroup>
 </Project>

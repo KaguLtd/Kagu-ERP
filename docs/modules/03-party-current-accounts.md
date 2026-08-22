@@ -62,10 +62,11 @@ Bakiye mutable tek kolon değildir; hareketlerden türetilir. Performans özeti 
 
 ## 7. Settlement invariantları
 
-- Settlement amount > 0.
-- Aynı party account/company.
-- Toplam settlement payment available amount ve open item remaining amount'ı aşamaz.
-- Posted settlement değişmez; unapply ayrı reversal event ve GL.
+- `PARTY-INV-001`: Settlement/allocation amount > 0.
+- `PARTY-INV-002`: Allocation aynı tenant, company ve party account kapsamındadır.
+- `PARTY-INV-003`: Toplam allocation payment available amount ve open item remaining amount'ı aşamaz.
+- `PARTY-INV-004`: Posted allocation değişmez; unallocation ayrı reversal event ve GL etkisi üretir.
+- `PARTY-INV-005`: Farklı para birimindeki allocation kullanılan kur, functional amount ve rounding snapshot'ını taşır.
 - Kısmi kapama ve bir ödemenin çok faturaya dağıtımı desteklenir.
 - Otomatik kapama kuralı açıkça seçilir: exact reference, oldest due, kullanıcı dağıtımı.
 

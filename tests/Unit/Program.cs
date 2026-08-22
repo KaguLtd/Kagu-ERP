@@ -1,4 +1,5 @@
 using KaguERP.Modules.Accounting.Domain.Journals;
+using PartyAllocations = KaguERP.Modules.Parties.Domain.Allocations;
 
 var checks = new (string Name, Action Run)[]
 {
@@ -13,6 +14,10 @@ var checks = new (string Name, Action Run)[]
     ("ACC-INV-005 canonical posting identity", PostingIdentityIsCanonicalAndComparable),
     ("ACC-INV-005 duplicate source rejection", DuplicateJournalSourceIsRejected),
     ("ACC-INV-005 scope separation and set immutability", PostingIdentityScopeAndDraftSetAreProtected),
+    ("PARTY-INV-001 allocation amount and capacity boundaries", AllocationAmountBoundariesAreEnforced),
+    ("PARTY-INV-002 allocation scope and currency boundaries", AllocationScopeAndCurrencyAreEnforced),
+    ("PARTY-INV-003 multi-item allocation capacity", MultiItemAllocationCapacityIsEnforced),
+    ("PARTY allocation order and immutability", AllocationOrderAndImmutabilityAreProtected),
 };
 
 var failures = new List<string>();
@@ -265,6 +270,165 @@ static void PostingIdentityScopeAndDraftSetAreProtected()
     ExpectInvariant("JOURNAL_DRAFT_SET_EMPTY", () => ValidatedJournalDraftSet.Create([]));
 }
 
+static void AllocationAmountBoundariesAreEnforced()
+{
+    var context = CreateAllocationTestContext();
+    var openItem = CreateOpenItem(context, 10m);
+
+    ExpectAllocationInvariant(
+        "ALLOCATION_AMOUNT_INVALID",
+        () => PartyAllocations.AllocationPlanLine.Create(openItem, 0m));
+    ExpectAllocationInvariant(
+        "ALLOCATION_OPEN_ITEM_EXCEEDED",
+        () => PartyAllocations.AllocationPlanLine.Create(openItem, 10.0001m));
+    ExpectAllocationInvariant(
+        "ALLOCATION_PAYMENT_CAPACITY_INVALID",
+        () => CreatePayment(context, 0m));
+    ExpectAllocationInvariant(
+        "ALLOCATION_OPEN_ITEM_CAPACITY_INVALID",
+        () => CreateOpenItem(context, -0.0001m));
+    ExpectAllocationInvariant(
+        "ALLOCATION_CURRENCY_INVALID",
+        () => PartyAllocations.AllocationCurrencyCode.Create("gbp"));
+
+    var exactLine = PartyAllocations.AllocationPlanLine.Create(openItem, 10m);
+    Equal(0m, exactLine.OpenItemRemainingAfter, "Exact allocation left an unexpected remainder.");
+}
+
+static void AllocationScopeAndCurrencyAreEnforced()
+{
+    var context = CreateAllocationTestContext();
+    var payment = CreatePayment(context, 100m);
+
+    ExpectAllocationInvariant(
+        "ALLOCATION_TENANT_MISMATCH",
+        () => CreateAllocationPlan(payment, CreateOpenItem(context with { TenantId = Guid.NewGuid() }, 10m), 10m));
+    ExpectAllocationInvariant(
+        "ALLOCATION_COMPANY_MISMATCH",
+        () => CreateAllocationPlan(payment, CreateOpenItem(context with { CompanyId = Guid.NewGuid() }, 10m), 10m));
+    ExpectAllocationInvariant(
+        "ALLOCATION_PARTY_ACCOUNT_MISMATCH",
+        () => CreateAllocationPlan(payment, CreateOpenItem(context with { PartyAccountId = Guid.NewGuid() }, 10m), 10m));
+    ExpectAllocationInvariant(
+        "ALLOCATION_CROSS_CURRENCY_REQUIRES_RATE_SNAPSHOT",
+        () => CreateAllocationPlan(
+            payment,
+            CreateOpenItem(context with { Currency = PartyAllocations.AllocationCurrencyCode.Create("EUR") }, 10m),
+            10m));
+}
+
+static void MultiItemAllocationCapacityIsEnforced()
+{
+    var context = CreateAllocationTestContext();
+    var payment = CreatePayment(context, 100m);
+    var firstItem = CreateOpenItem(context, 70m);
+    var secondItem = CreateOpenItem(context, 80m);
+    var plan = PartyAllocations.ValidatedSameCurrencyAllocationPlan.Create(
+        payment,
+        [
+            PartyAllocations.AllocationPlanLine.Create(firstItem, 60m),
+            PartyAllocations.AllocationPlanLine.Create(secondItem, 40m),
+        ]);
+
+    Equal(100m, plan.TotalAllocated, "Unexpected total allocation.");
+    Equal(0m, plan.PaymentRemainingAfter, "Unexpected payment remainder.");
+    Equal(10m, plan.Lines[0].OpenItemRemainingAfter, "Unexpected first open-item remainder.");
+    Equal(40m, plan.Lines[1].OpenItemRemainingAfter, "Unexpected second open-item remainder.");
+
+    ExpectAllocationInvariant(
+        "ALLOCATION_PAYMENT_EXCEEDED",
+        () => PartyAllocations.ValidatedSameCurrencyAllocationPlan.Create(
+            payment,
+            [
+                PartyAllocations.AllocationPlanLine.Create(firstItem, 70m),
+                PartyAllocations.AllocationPlanLine.Create(secondItem, 30.0001m),
+            ]));
+    ExpectAllocationInvariant(
+        "ALLOCATION_OPEN_ITEM_DUPLICATE",
+        () => PartyAllocations.ValidatedSameCurrencyAllocationPlan.Create(
+            payment,
+            [
+                PartyAllocations.AllocationPlanLine.Create(firstItem, 30m),
+                PartyAllocations.AllocationPlanLine.Create(firstItem, 20m),
+            ]));
+    ExpectAllocationInvariant(
+        "ALLOCATION_PAYMENT_EXCEEDED",
+        () => PartyAllocations.ValidatedSameCurrencyAllocationPlan.Create(
+            CreatePayment(context, decimal.MaxValue),
+            [
+                PartyAllocations.AllocationPlanLine.Create(CreateOpenItem(context, decimal.MaxValue), decimal.MaxValue),
+                PartyAllocations.AllocationPlanLine.Create(CreateOpenItem(context, 1m), 1m),
+            ]));
+}
+
+static void AllocationOrderAndImmutabilityAreProtected()
+{
+    var context = CreateAllocationTestContext();
+    var payment = CreatePayment(context, 100m);
+    var firstLine = PartyAllocations.AllocationPlanLine.Create(CreateOpenItem(context, 70m), 60m);
+    var secondLine = PartyAllocations.AllocationPlanLine.Create(CreateOpenItem(context, 80m), 30m);
+    var input = new[] { firstLine, secondLine };
+    var firstPlan = PartyAllocations.ValidatedSameCurrencyAllocationPlan.Create(payment, input);
+    var reversedPlan = PartyAllocations.ValidatedSameCurrencyAllocationPlan.Create(payment, input.Reverse());
+
+    Equal(firstPlan.TotalAllocated, reversedPlan.TotalAllocated, "Line order changed the total allocation.");
+    Equal(firstPlan.PaymentRemainingAfter, reversedPlan.PaymentRemainingAfter, "Line order changed the payment remainder.");
+
+    input[0] = PartyAllocations.AllocationPlanLine.Create(CreateOpenItem(context, 1m), 1m);
+    if (!ReferenceEquals(firstLine, firstPlan.Lines[0]))
+    {
+        throw new InvalidOperationException("Validated allocation retained a mutable input collection.");
+    }
+
+    if (firstPlan.Lines is IList<PartyAllocations.AllocationPlanLine> list)
+    {
+        Throws<NotSupportedException>(() => list[0] = input[0]);
+    }
+}
+
+static AllocationTestContext CreateAllocationTestContext() =>
+    new(
+        Guid.NewGuid(),
+        Guid.NewGuid(),
+        Guid.NewGuid(),
+        PartyAllocations.AllocationCurrencyCode.Create("GBP"));
+
+static PartyAllocations.PaymentAllocationCapacity CreatePayment(
+    AllocationTestContext context,
+    decimal usableAmount) =>
+    PartyAllocations.PaymentAllocationCapacity.Create(
+        context.TenantId,
+        context.CompanyId,
+        context.PartyAccountId,
+        Guid.NewGuid(),
+        context.Currency,
+        usableAmount);
+
+static PartyAllocations.OpenItemAllocationCapacity CreateOpenItem(
+    AllocationTestContext context,
+    decimal remainingAmount) =>
+    PartyAllocations.OpenItemAllocationCapacity.Create(
+        context.TenantId,
+        context.CompanyId,
+        context.PartyAccountId,
+        Guid.NewGuid(),
+        context.Currency,
+        remainingAmount);
+
+static PartyAllocations.ValidatedSameCurrencyAllocationPlan CreateAllocationPlan(
+    PartyAllocations.PaymentAllocationCapacity payment,
+    PartyAllocations.OpenItemAllocationCapacity openItem,
+    decimal amount) =>
+    PartyAllocations.ValidatedSameCurrencyAllocationPlan.Create(
+        payment,
+        [PartyAllocations.AllocationPlanLine.Create(openItem, amount)]);
+
+static void ExpectAllocationInvariant(string expectedCode, Action action)
+{
+    var exception = Throws<PartyAllocations.AllocationInvariantException>(action);
+    Equal(expectedCode, exception.Code, "Unexpected allocation invariant code.");
+}
+
 static JournalLineDraft[] CreateBalancedLines(decimal amount) =>
 [
     JournalLineDraft.Create(Guid.NewGuid(), null, JournalAmount.Create(amount, 0m)),
@@ -324,3 +488,9 @@ static void Equal<T>(T expected, T actual, string message)
         throw new InvalidOperationException($"{message} Expected: {expected}; actual: {actual}.");
     }
 }
+
+internal sealed record AllocationTestContext(
+    Guid TenantId,
+    Guid CompanyId,
+    Guid PartyAccountId,
+    PartyAllocations.AllocationCurrencyCode Currency);

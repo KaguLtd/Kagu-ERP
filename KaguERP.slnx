@@ -28,6 +28,9 @@
   <Folder Name="/src/Modules/Accounting/Accounting.Domain/">
     <Project Path="src/Modules/Accounting/Accounting.Domain/KaguERP.Modules.Accounting.Domain.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Parties/Parties.Domain/">
+    <Project Path="src/Modules/Parties/Parties.Domain/KaguERP.Modules.Parties.Domain.csproj" />
+  </Folder>
   <Folder Name="/tests/" />
   <Folder Name="/tests/Architecture/">
     <Project Path="tests/Architecture/KaguERP.ArchitectureChecks.csproj" />
