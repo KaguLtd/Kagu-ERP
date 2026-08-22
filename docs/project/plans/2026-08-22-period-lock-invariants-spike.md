@@ -6,7 +6,7 @@ Implement a policy-independent Accounting Domain state-machine and fail-closed p
 
 - Master phase/backlog: MP-03 / item 14
 - Risk: R4 — financial integrity, closed-period posting and tenant/company isolation
-- Status: Validating — local evidence complete; remote CI pending
+- Status: Completed — technical spike evidence recorded
 - Requirements: `ACC-INV-004`, `ACC-PER-001`, `ACC-PER-002`, `ACC-PER-003`
 
 ## Definition of Ready
@@ -48,7 +48,7 @@ The lock set is a caller-supplied validation snapshot. It is not an authoritativ
 - [x] Implement immutable scoped lock snapshots and close transitions.
 - [x] Implement fail-closed standard posting validation.
 - [x] Pass boundary, scope, ordering and immutability checks.
-- [ ] Pass local and remote repository gates.
+- [x] Pass local and remote repository gates.
 
 ## Test Plan
 
@@ -73,4 +73,6 @@ Local verification on 22 August 2026:
 - `scripts/verify.ps1` passed end to end: locked restore, formatting, web lint/typecheck/test/build, PostgreSQL migration and tenant/company RLS, Keycloak scope smoke, isolated restore/outbox/auth smoke, and Android lint/unit/instrumentation build.
 - `git diff --check` passed.
 
-Remote CI evidence will be recorded after the stacked draft pull request is created. This spike does not authorize a reopen, define company period policy, or satisfy the MP-03 entry/exit gate.
+Remote verification: draft PR [#10](https://github.com/KaguLtd/Kagu-ERP/pull/10), stacked on `codex/mp03-party-allocation-invariants`, passed all six jobs in GitHub Actions run `32558068480`: backend/architecture, web, Android, PostgreSQL migration/RLS/restore, clean bootstrap and secret scan.
+
+This completed technical spike does not authorize a reopen, define company period policy, or satisfy the MP-03 entry/exit gate.
