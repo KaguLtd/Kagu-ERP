@@ -1,4 +1,5 @@
 using KaguERP.Modules.Accounting.Domain.Journals;
+using AccountingPeriods = KaguERP.Modules.Accounting.Domain.Periods;
 using PartyAllocations = KaguERP.Modules.Parties.Domain.Allocations;
 
 var checks = new (string Name, Action Run)[]
@@ -18,6 +19,9 @@ var checks = new (string Name, Action Run)[]
     ("PARTY-INV-002 allocation scope and currency boundaries", AllocationScopeAndCurrencyAreEnforced),
     ("PARTY-INV-003 multi-item allocation capacity", MultiItemAllocationCapacityIsEnforced),
     ("PARTY allocation order and immutability", AllocationOrderAndImmutabilityAreProtected),
+    ("ACC-PER-001 close progression", PeriodCloseProgressionIsEnforced),
+    ("ACC-PER-002 scoped lock isolation", PeriodLockScopesAreIsolated),
+    ("ACC-PER-003 fail-closed standard posting", StandardPostingPeriodGateFailsClosed),
 };
 
 var failures = new List<string>();
@@ -386,6 +390,184 @@ static void AllocationOrderAndImmutabilityAreProtected()
     }
 }
 
+static void PeriodCloseProgressionIsEnforced()
+{
+    var softClose = AccountingPeriods.PeriodCloseTransition.Create(
+        AccountingPeriods.PeriodCloseStage.Open,
+        AccountingPeriods.PeriodCloseStage.SoftClose);
+    var review = AccountingPeriods.PeriodCloseTransition.Create(
+        AccountingPeriods.PeriodCloseStage.SoftClose,
+        AccountingPeriods.PeriodCloseStage.Review);
+    var hardClose = AccountingPeriods.PeriodCloseTransition.Create(
+        AccountingPeriods.PeriodCloseStage.Review,
+        AccountingPeriods.PeriodCloseStage.HardClose);
+
+    Equal(AccountingPeriods.PeriodCloseStage.SoftClose, softClose.To, "Unexpected soft-close target.");
+    Equal(AccountingPeriods.PeriodCloseStage.Review, review.To, "Unexpected review target.");
+    Equal(AccountingPeriods.PeriodCloseStage.HardClose, hardClose.To, "Unexpected hard-close target.");
+
+    ExpectPeriodInvariant(
+        "PERIOD_TRANSITION_NO_CHANGE",
+        () => AccountingPeriods.PeriodCloseTransition.Create(
+            AccountingPeriods.PeriodCloseStage.Open,
+            AccountingPeriods.PeriodCloseStage.Open));
+    ExpectPeriodInvariant(
+        "PERIOD_TRANSITION_INVALID",
+        () => AccountingPeriods.PeriodCloseTransition.Create(
+            AccountingPeriods.PeriodCloseStage.Open,
+            AccountingPeriods.PeriodCloseStage.Review));
+    ExpectPeriodInvariant(
+        "PERIOD_REOPEN_REQUIRES_APPROVED_WORKFLOW",
+        () => AccountingPeriods.PeriodCloseTransition.Create(
+            AccountingPeriods.PeriodCloseStage.HardClose,
+            AccountingPeriods.PeriodCloseStage.Review));
+
+    var context = CreatePeriodTestContext();
+    ExpectPeriodInvariant(
+        "PERIOD_CLOSE_STAGE_INVALID",
+        () => CreatePeriodLock(context, AccountingPeriods.PeriodLockScope.GeneralLedger, (AccountingPeriods.PeriodCloseStage)99));
+    ExpectPeriodInvariant(
+        "PERIOD_LOCK_VERSION_INVALID",
+        () => CreatePeriodLock(context, AccountingPeriods.PeriodLockScope.GeneralLedger, version: 0));
+    ExpectPeriodInvariant(
+        "PERIOD_LOCK_SCOPE_INVALID",
+        () => CreatePeriodLock(context, (AccountingPeriods.PeriodLockScope)99));
+    ExpectPeriodInvariant(
+        "PERIOD_TENANT_REQUIRED",
+        () => CreatePeriodLock(context with { TenantId = Guid.Empty }, AccountingPeriods.PeriodLockScope.GeneralLedger));
+    ExpectPeriodInvariant(
+        "PERIOD_COMPANY_REQUIRED",
+        () => CreatePeriodLock(context with { CompanyId = Guid.Empty }, AccountingPeriods.PeriodLockScope.GeneralLedger));
+    ExpectPeriodInvariant(
+        "PERIOD_ID_REQUIRED",
+        () => CreatePeriodLock(context with { PeriodId = Guid.Empty }, AccountingPeriods.PeriodLockScope.GeneralLedger));
+}
+
+static void PeriodLockScopesAreIsolated()
+{
+    var context = CreatePeriodTestContext();
+    var glLock = CreatePeriodLock(context, AccountingPeriods.PeriodLockScope.GeneralLedger);
+    var hardLegalLock = CreatePeriodLock(context, AccountingPeriods.PeriodLockScope.HardLegal);
+    var taxLock = CreatePeriodLock(
+        context,
+        AccountingPeriods.PeriodLockScope.Tax,
+        AccountingPeriods.PeriodCloseStage.HardClose);
+    var input = new[] { glLock, hardLegalLock, taxLock };
+    var lockSet = CreatePeriodLockSet(context, input);
+
+    input[0] = CreatePeriodLock(
+        context,
+        AccountingPeriods.PeriodLockScope.GeneralLedger,
+        AccountingPeriods.PeriodCloseStage.HardClose,
+        2);
+    if (!ReferenceEquals(glLock, lockSet.Locks[0]))
+    {
+        throw new InvalidOperationException("Validated period lock set retained a mutable input collection.");
+    }
+
+    if (lockSet.Locks is IList<AccountingPeriods.PeriodLockSnapshot> list)
+    {
+        Throws<NotSupportedException>(() => list[0] = input[0]);
+    }
+
+    Equal(
+        AccountingPeriods.PeriodCloseStage.HardClose,
+        lockSet.GetRequired(AccountingPeriods.PeriodLockScope.Tax).Stage,
+        "Tax scope changed unexpectedly.");
+    Equal(
+        AccountingPeriods.PeriodCloseStage.Open,
+        lockSet.GetRequired(AccountingPeriods.PeriodLockScope.GeneralLedger).Stage,
+        "GL scope changed with an unrelated scope.");
+
+    ExpectPeriodInvariant(
+        "PERIOD_LOCK_SCOPE_DUPLICATE",
+        () => CreatePeriodLockSet(context, [glLock, CreatePeriodLock(context, AccountingPeriods.PeriodLockScope.GeneralLedger)]));
+    ExpectPeriodInvariant(
+        "PERIOD_LOCKS_REQUIRED",
+        () => CreatePeriodLockSet(context, []));
+    ExpectPeriodInvariant(
+        "PERIOD_TENANT_MISMATCH",
+        () => CreatePeriodLockSet(
+            context,
+            [CreatePeriodLock(context with { TenantId = Guid.NewGuid() }, AccountingPeriods.PeriodLockScope.GeneralLedger)]));
+    ExpectPeriodInvariant(
+        "PERIOD_COMPANY_MISMATCH",
+        () => CreatePeriodLockSet(
+            context,
+            [CreatePeriodLock(context with { CompanyId = Guid.NewGuid() }, AccountingPeriods.PeriodLockScope.GeneralLedger)]));
+    ExpectPeriodInvariant(
+        "PERIOD_ID_MISMATCH",
+        () => CreatePeriodLockSet(
+            context,
+            [CreatePeriodLock(context with { PeriodId = Guid.NewGuid() }, AccountingPeriods.PeriodLockScope.GeneralLedger)]));
+}
+
+static void StandardPostingPeriodGateFailsClosed()
+{
+    var context = CreatePeriodTestContext();
+    var openGlLock = CreatePeriodLock(context, AccountingPeriods.PeriodLockScope.GeneralLedger);
+    var openHardLegalLock = CreatePeriodLock(context, AccountingPeriods.PeriodLockScope.HardLegal);
+    var closedTaxLock = CreatePeriodLock(
+        context,
+        AccountingPeriods.PeriodLockScope.Tax,
+        AccountingPeriods.PeriodCloseStage.HardClose);
+    CreatePeriodLockSet(context, [openGlLock, openHardLegalLock, closedTaxLock]).EnsureStandardPostingAllowed();
+
+    ExpectPeriodInvariant(
+        "PERIOD_GL_LOCK_BLOCKS_POSTING",
+        () => CreatePeriodLockSet(
+            context,
+            [
+                CreatePeriodLock(context, AccountingPeriods.PeriodLockScope.GeneralLedger, AccountingPeriods.PeriodCloseStage.SoftClose),
+                openHardLegalLock,
+            ]).EnsureStandardPostingAllowed());
+    ExpectPeriodInvariant(
+        "PERIOD_HARD_LOCK_BLOCKS_POSTING",
+        () => CreatePeriodLockSet(
+            context,
+            [
+                openGlLock,
+                CreatePeriodLock(context, AccountingPeriods.PeriodLockScope.HardLegal, AccountingPeriods.PeriodCloseStage.HardClose),
+            ]).EnsureStandardPostingAllowed());
+    ExpectPeriodInvariant(
+        "PERIOD_LOCK_SCOPE_MISSING",
+        () => CreatePeriodLockSet(context, [openGlLock]).EnsureStandardPostingAllowed());
+    ExpectPeriodInvariant(
+        "PERIOD_LOCK_SCOPE_MISSING",
+        () => CreatePeriodLockSet(context, [openHardLegalLock]).EnsureStandardPostingAllowed());
+}
+
+static PeriodTestContext CreatePeriodTestContext() =>
+    new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+
+static AccountingPeriods.PeriodLockSnapshot CreatePeriodLock(
+    PeriodTestContext context,
+    AccountingPeriods.PeriodLockScope scope,
+    AccountingPeriods.PeriodCloseStage stage = AccountingPeriods.PeriodCloseStage.Open,
+    long version = 1) =>
+    AccountingPeriods.PeriodLockSnapshot.Create(
+        context.TenantId,
+        context.CompanyId,
+        context.PeriodId,
+        scope,
+        stage,
+        version);
+
+static AccountingPeriods.ValidatedPeriodLockSet CreatePeriodLockSet(
+    PeriodTestContext context,
+    IEnumerable<AccountingPeriods.PeriodLockSnapshot> locks) =>
+    AccountingPeriods.ValidatedPeriodLockSet.Create(
+        context.TenantId,
+        context.CompanyId,
+        context.PeriodId,
+        locks);
+
+static void ExpectPeriodInvariant(string expectedCode, Action action)
+{
+    var exception = Throws<AccountingPeriods.PeriodInvariantException>(action);
+    Equal(expectedCode, exception.Code, "Unexpected period invariant code.");
+}
+
 static AllocationTestContext CreateAllocationTestContext() =>
     new(
         Guid.NewGuid(),
@@ -481,9 +663,8 @@ static TException Throws<TException>(Action action)
 }
 
 static void Equal<T>(T expected, T actual, string message)
-    where T : IEquatable<T>
 {
-    if (!actual.Equals(expected))
+    if (!EqualityComparer<T>.Default.Equals(actual, expected))
     {
         throw new InvalidOperationException($"{message} Expected: {expected}; actual: {actual}.");
     }
@@ -494,3 +675,5 @@ internal sealed record AllocationTestContext(
     Guid CompanyId,
     Guid PartyAccountId,
     PartyAllocations.AllocationCurrencyCode Currency);
+
+internal sealed record PeriodTestContext(Guid TenantId, Guid CompanyId, Guid PeriodId);

@@ -47,6 +47,10 @@ Manuel fiş taslak, onay ve postala aşamalarından geçer. Hazırlayan ile onay
 
 ## 6. Dönem işlemleri
 
+- `ACC-PER-001`: Kapanış durumu `open → soft_close → review → hard_close` sırasını izler; geri geçiş normal state transition değildir ve onaylı reopen workflow snapshot'ı ister.
+- `ACC-PER-002`: Operational, inventory valuation, GL, tax ve hard/legal kilitleri company + period + scope bazında ayrıdır; bir kapsamın açılması diğerini açmaz.
+- `ACC-PER-003`: Standart posting, ilgili GL ve hard/legal kilit snapshot'ları açık değilse veya eksikse fail-closed reddedilir.
+
 - açılış bakiyeleri ve önceki dönem devri,
 - tahakkuk ve ters tahakkuk,
 - masraf dağıtımı,
