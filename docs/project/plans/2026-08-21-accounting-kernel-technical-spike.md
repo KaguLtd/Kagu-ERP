@@ -98,5 +98,5 @@ MP-02 teknik platformu tamamlanmıştır. Bu plan MP-03 fazını production/busi
 - [x] Release build, format ve architecture check geçer.
 - [x] Root verify domain unit harness'i ve tüm yerel kapıları çalıştırır.
 - [x] Remote CI domain unit harness'i çalıştırır.
-- [ ] Açık business kararları kod içine sabitlenmemiştir.
-- [ ] Plan günlüğü ve master etkisi günceldir.
+- [x] Açık business kararları kod içine sabitlenmemiştir.
+- [x] Plan günlüğü ve master etkisi günceldir.

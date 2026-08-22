@@ -14,6 +14,7 @@ public sealed class ValidatedJournalDraft
         DateOnly effectiveDate,
         DateTimeOffset recordedAt,
         CurrencyCode functionalCurrency,
+        JournalPostingIdentity postingIdentity,
         ReadOnlyCollection<JournalLineDraft> lines,
         decimal totalDebit,
         decimal totalCredit)
@@ -27,6 +28,7 @@ public sealed class ValidatedJournalDraft
         EffectiveDate = effectiveDate;
         RecordedAt = recordedAt;
         FunctionalCurrency = functionalCurrency;
+        PostingIdentity = postingIdentity;
         Lines = lines;
         TotalDebit = totalDebit;
         TotalCredit = totalCredit;
@@ -50,6 +52,8 @@ public sealed class ValidatedJournalDraft
 
     public CurrencyCode FunctionalCurrency { get; }
 
+    public JournalPostingIdentity PostingIdentity { get; }
+
     public IReadOnlyList<JournalLineDraft> Lines { get; }
 
     public decimal TotalDebit { get; }
@@ -68,15 +72,16 @@ public sealed class ValidatedJournalDraft
         CurrencyCode functionalCurrency,
         IEnumerable<JournalLineDraft> lines)
     {
-        RequireId(tenantId, "JOURNAL_TENANT_REQUIRED", "Tenant ID is required.");
-        RequireId(companyId, "JOURNAL_COMPANY_REQUIRED", "Company ID is required.");
-        RequireId(sourceEventId, "JOURNAL_SOURCE_REQUIRED", "Source event ID is required.");
+        var postingIdentity = JournalPostingIdentity.Create(
+            tenantId,
+            companyId,
+            sourceType,
+            sourceEventId,
+            postingPurpose);
         RequireId(
             postingRuleVersionId,
             "JOURNAL_RULE_VERSION_REQUIRED",
             "Posting rule version ID is required.");
-        RequireText(sourceType, "JOURNAL_SOURCE_TYPE_REQUIRED", "Source type is required.");
-        RequireText(postingPurpose, "JOURNAL_PURPOSE_REQUIRED", "Posting purpose is required.");
 
         if (recordedAt.Offset != TimeSpan.Zero)
         {
@@ -121,11 +126,12 @@ public sealed class ValidatedJournalDraft
             companyId,
             sourceEventId,
             postingRuleVersionId,
-            sourceType.Trim(),
-            postingPurpose.Trim(),
+            postingIdentity.SourceType,
+            postingIdentity.PostingPurpose,
             effectiveDate,
             recordedAt,
             functionalCurrency,
+            postingIdentity,
             Array.AsReadOnly(lineArray),
             totalDebit,
             totalCredit);
@@ -139,11 +145,4 @@ public sealed class ValidatedJournalDraft
         }
     }
 
-    private static void RequireText(string value, string code, string message)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            throw new JournalInvariantException(code, message);
-        }
-    }
 }
