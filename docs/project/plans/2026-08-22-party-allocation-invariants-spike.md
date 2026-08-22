@@ -6,7 +6,7 @@ Implement the smallest policy-independent domain slice for validating a same-cur
 
 - Master phase: MP-03
 - Risk: R4 — financial correctness and tenant/company isolation
-- Status: Validating — local evidence complete; remote CI pending
+- Status: Completed — technical spike evidence recorded
 - Requirements: `PARTY-INV-001`, `PARTY-INV-002`, `PARTY-INV-003`; same-currency technical subset of `PARTY-INV-005`
 
 ## Definition of Ready
@@ -48,7 +48,7 @@ The capacity values are caller-supplied validation snapshots. They are not an au
 - [x] Implement immutable allocation capacity and plan values.
 - [x] Prove amount, scope, currency, duplicate, ordering and immutability invariants.
 - [x] Pass solution build and repository verification.
-- [ ] Record local and remote evidence.
+- [x] Record local and remote evidence.
 
 ## Test Plan
 
@@ -75,4 +75,6 @@ Local verification on 22 August 2026:
 - `dotnet format KaguERP.slnx --no-restore --verify-no-changes` and `git diff --check` passed.
 - `scripts/verify.ps1` passed end to end: locked restore, Release build, domain and architecture checks, web lint/typecheck/test/build, PostgreSQL migration and tenant/company RLS checks, Keycloak scope smoke, isolated restore/outbox/auth smoke, and Android lint/unit/instrumentation build.
 
-Remote CI evidence will be recorded after the stacked draft pull request is created. This spike does not satisfy the MP-03 entry or exit gate and does not validate production concurrency, posted allocation or FX behavior.
+Remote verification: draft PR [#9](https://github.com/KaguLtd/Kagu-ERP/pull/9), stacked on `codex/mp03-accounting-invariants`, passed all six jobs in GitHub Actions run `32556744288`: backend/architecture, web, Android, PostgreSQL migration/RLS/restore, clean bootstrap and secret scan.
+
+This completed technical spike does not satisfy the MP-03 entry or exit gate and does not validate production concurrency, posted allocation or FX behavior.
