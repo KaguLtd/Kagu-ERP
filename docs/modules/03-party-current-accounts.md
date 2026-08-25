@@ -160,6 +160,11 @@ Bir fatura tek OpenItem olmak zorunda değildir. DueScheduleLine her taksit içi
 
 ayrı izler. Yaşlandırma belge tarihine değil açık policy’ye göre vade tarihine; as-of raporu effective-date + o tarihe kadar kaydedilmiş allocation olaylarına dayanır.
 
+- `PARTY-DUE-001`: Her vade satırı tenant, company, party account, kaynak olay, para, payment-term snapshot, control account, pozitif original amount ve açık due date taşır.
+- `PARTY-DUE-002`: Bir kaynağın vade satırları mükerrer olamaz ve original amount toplamı kaynak original amount'a tam eşit olmalıdır.
+- `PARTY-OI-001`: Open-item remaining amount mutable otorite değildir; original amount eksi as-of allocation ve write-off karşılıklarından türetilir.
+- `PARTY-OI-002`: Unallocation ve write-off reversal, asıl append-only olaya aynı kapsam/para/tutarla bağlanır; asıl olay değiştirilmez veya silinmez.
+
 ## 16. Payment allocation defteri
 
 Payment ekonomik nakit olayıdır; PaymentAllocation ödeme/kredi/mahsup ile DueScheduleLine arasındaki bağdır. Allocation:

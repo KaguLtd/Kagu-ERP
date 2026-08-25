@@ -13,6 +13,14 @@ internal sealed class MigrationRunner(string connectionString)
         new("0002_identity_membership_and_permissions", "0002_identity_membership_and_permissions.sql"),
         new("0003_append_only_authorization_audit", "0003_append_only_authorization_audit.sql"),
         new("0004_transactional_outbox", "0004_transactional_outbox.sql"),
+        new("0005_accounting_journal_source_reservation", "0005_accounting_journal_source_reservation.sql"),
+        new("0006_validated_journal_draft", "0006_validated_journal_draft.sql"),
+        new("0007_accounting_period_posting_gate", "0007_accounting_period_posting_gate.sql"),
+        new("0008_api_idempotency_record", "0008_api_idempotency_record.sql"),
+        new("0009_idempotency_completion_guard", "0009_idempotency_completion_guard.sql"),
+        new("0010_account_posting_evidence", "0010_account_posting_evidence.sql"),
+        new("0011_posting_dimension_evidence", "0011_posting_dimension_evidence.sql"),
+        new("0012_currency_rounding_evidence", "0012_currency_rounding_evidence.sql"),
     ];
 
     public async Task<int> RunAsync(CancellationToken cancellationToken)

@@ -46,6 +46,9 @@ Bir satır birden fazla ERP hareketine veya bir ERP hareketi birden fazla banka 
 - `BNK-INV-005`: Mutabık hareketin değişmesi yeniden mutabakat gerektirir.
 - `BNK-INV-006`: Kasa bakiyesi, kesinleşmiş hareketlerin toplamıdır; elle bakiye yazılamaz.
 - `BNK-INV-007`: Ödeme dosyası üretme ve bankaya gönderme yetkileri ayrı atanabilir.
+- `BNK-STMT-001`: Normalize edilmiş ekstre satırı tenant, company, treasury account ve kanonik dış işlem kimliği kapsamında tekildir; yeniden import ikinci mali satır üretmez.
+- `BNK-REC-001`: Reconciliation önerisi, ekstre satırı ve iç hareketi değiştirmeyen ayrı bir eşleştirme gerçeğidir.
+- `BNK-REC-002`: Bir reconciliation önerisindeki eşleştirmeler aynı tenant/company/treasury account/para kapsamında kalır; toplam eşleşen tutar ekstre satırı veya iç hareket kapasitesini aşamaz.
 
 ## 5. Eşleştirme motoru
 
@@ -113,6 +116,9 @@ Zorunlu testler:
 ## 11. Ödeme, transfer ve banka kesinleşme durumları
 
 Payment yaşam döngüsü ile banka durumu ayrıdır:
+
+- `BNK-PAY-001`: Payment kendi tenant/company/source kimliğiyle ayrı ekonomik olaydır; allocation, banka kesinleşmesi ve reconciliation payment kaydının alanları veya durum eş anlamları değildir.
+- `BNK-PAY-002`: Aynı company ve canonical source identity aynı posting purpose için en fazla bir payment ekonomik olay niyeti üretir.
 
 - draft → approved → posted: iç nakit/banka hareketi kaydedildi;
 - submitted/in_transit: bankaya iletildi veya bankadan kesinleşme bekliyor;

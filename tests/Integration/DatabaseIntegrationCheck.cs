@@ -1,9 +1,17 @@
 using System.Security.Claims;
 using KaguERP.Bootstrap;
 using KaguERP.BuildingBlocks.Application.Audit;
+using KaguERP.BuildingBlocks.Application.Idempotency;
 using KaguERP.BuildingBlocks.Application.Messaging;
 using KaguERP.BuildingBlocks.Application.Observability;
 using KaguERP.BuildingBlocks.Application.Security;
+using KaguERP.Modules.Accounting.Application.Posting;
+using KaguERP.Modules.Accounting.Domain.Accounts;
+using KaguERP.Modules.Accounting.Domain.Currencies;
+using KaguERP.Modules.Accounting.Domain.Dimensions;
+using KaguERP.Modules.Accounting.Domain.Journals;
+using KaguERP.Modules.Accounting.Domain.Periods;
+using KaguERP.Modules.Accounting.Infrastructure.Persistence;
 using Npgsql;
 
 namespace KaguERP.DatabaseIntegrationChecks;
@@ -56,6 +64,67 @@ internal static class DatabaseIntegrationCheck
                 companyA1,
                 companyA2,
                 actorId);
+            await AssertApiIdempotencyPersistenceAsync(
+                migratorDataSource,
+                appDataSource,
+                tenantA,
+                companyA1,
+                companyA2,
+                actorId);
+            await AssertAuthoritativeJournalAccountEvidenceAsync(
+                migratorDataSource,
+                appDataSource,
+                tenantA,
+                companyA1,
+                companyA2,
+                actorId);
+            await AssertAuthoritativeJournalDimensionEvidenceAsync(
+                migratorDataSource,
+                appDataSource,
+                tenantA,
+                companyA1,
+                companyA2,
+                actorId);
+            await AssertAuthoritativeJournalCurrencyEvidenceAsync(
+                migratorDataSource,
+                appDataSource,
+                tenantA,
+                companyA1,
+                companyA2,
+                actorId);
+            await AssertJournalSourceReservationAsync(
+                migratorDataSource,
+                appDataSource,
+                tenantA,
+                companyA1,
+                companyA2,
+                actorId);
+            await AssertJournalSourceReservationWriterAsync(
+                migratorDataSource,
+                appDataSource,
+                tenantA,
+                companyA1,
+                companyA2,
+                actorId);
+            await AssertAuthoritativePeriodPostingGateAsync(
+                migratorDataSource,
+                appDataSource,
+                tenantA,
+                companyA1,
+                companyA2,
+                actorId);
+            await AssertJournalPreparationOrchestrationAsync(
+                migratorDataSource,
+                appDataSource,
+                tenantA,
+                companyA1,
+                actorId);
+            await AssertJournalReservationAuditOutboxAtomicityAsync(
+                migratorDataSource,
+                appDataSource,
+                tenantA,
+                companyA1,
+                actorId);
             await AssertScopedReadsAsync(appDataSource, tenantA, tenantB, companyA1, companyA2);
             await AssertAuthorizedWriteAsync(appDataSource, tenantA, actorId);
             await AssertCrossTenantWriteRejectedAsync(appDataSource, tenantA, tenantB, Guid.CreateVersion7(), actorId);
@@ -68,6 +137,524 @@ internal static class DatabaseIntegrationCheck
         {
             await CleanupAsync(migratorDataSource, tenantA, tenantB);
         }
+    }
+
+    private static async Task AssertApiIdempotencyPersistenceAsync(
+        NpgsqlDataSource migratorDataSource,
+        NpgsqlDataSource appDataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid otherCompanyId,
+        Guid actorId)
+    {
+        const string commandName = "accounting.journal.prepare";
+        string key = Guid.CreateVersion7().ToString("D");
+        const string requestHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        Guid aggregateId = Guid.CreateVersion7();
+
+        IdempotencyRecord[] results = await Task.WhenAll(
+            ExecuteIdempotentProbeAsync(appDataSource, tenantId, companyId, actorId, commandName, key, requestHash, aggregateId),
+            ExecuteIdempotentProbeAsync(appDataSource, tenantId, companyId, actorId, commandName, key, requestHash, aggregateId));
+        Assert(results.Count(result => result.Created) == 1,
+            "Parallel idempotency acquisition did not produce exactly one winner.");
+        IdempotencyRecord replay = results.Single(result => !result.Created);
+        Assert(replay.Status == IdempotencyRecordStatus.Completed && replay.ResponseStatus == 201 &&
+               replay.AggregateId == aggregateId && replay.ResponseBodyJson == $"{{\"id\":\"{aggregateId:D}\",\"status\":\"prepared\"}}",
+            "Idempotency replay did not return the completed response snapshot.");
+
+        await using (NpgsqlConnection conflictConnection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction conflictTransaction = await conflictConnection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(conflictConnection, conflictTransaction, tenantId, actorId, companyId);
+            IdempotencyKeyReusedException exception = await ThrowsAsync<IdempotencyKeyReusedException>(() =>
+                PostgresIdempotencyWriter.AcquireAsync(
+                    conflictConnection,
+                    conflictTransaction,
+                    new ExecutionScope(tenantId, actorId, [companyId]),
+                    companyId,
+                    Guid.CreateVersion7(),
+                    commandName,
+                    key,
+                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").AsTask());
+            Assert(exception.Code == "IDEMPOTENCY_KEY_REUSED", "Idempotency payload conflict returned the wrong code.");
+            await conflictTransaction.RollbackAsync();
+        }
+
+        Guid rolledBackRecordId = Guid.CreateVersion7();
+        await using (NpgsqlConnection rollbackConnection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction rollbackTransaction = await rollbackConnection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(rollbackConnection, rollbackTransaction, tenantId, actorId, companyId);
+            await PostgresIdempotencyWriter.AcquireAsync(
+                rollbackConnection,
+                rollbackTransaction,
+                new ExecutionScope(tenantId, actorId, [companyId]),
+                companyId,
+                rolledBackRecordId,
+                commandName,
+                Guid.CreateVersion7().ToString("D"),
+                requestHash);
+            await rollbackTransaction.RollbackAsync();
+        }
+
+        await using (NpgsqlConnection ownerConnection = await migratorDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction ownerTransaction = await ownerConnection.BeginTransactionAsync())
+        {
+            await ExecuteAsync(ownerConnection, ownerTransaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+            Assert(await CountAsync(
+                    ownerConnection,
+                    ownerTransaction,
+                    "SELECT count(*) FROM platform.idempotency_record WHERE record_id = $1",
+                    rolledBackRecordId) == 0,
+                "Idempotency record escaped caller-owned rollback.");
+            await ownerTransaction.CommitAsync();
+        }
+
+        await using (NpgsqlConnection scopeConnection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction scopeTransaction = await scopeConnection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(scopeConnection, scopeTransaction, tenantId, actorId, otherCompanyId);
+            Assert(await CountAsync(
+                    scopeConnection,
+                    scopeTransaction,
+                    "SELECT count(*) FROM platform.idempotency_record WHERE record_id = $1",
+                    results[0].RecordId) == 0,
+                "Idempotency response leaked across company scope.");
+            await scopeTransaction.CommitAsync();
+        }
+
+        await using NpgsqlConnection privilegeConnection = await appDataSource.OpenConnectionAsync();
+        await using var privilegeCommand = new NpgsqlCommand(
+            "SELECT has_table_privilege(current_user, 'platform.idempotency_record', 'SELECT'), has_table_privilege(current_user, 'platform.idempotency_record', 'INSERT'), has_table_privilege(current_user, 'platform.idempotency_record', 'UPDATE'), has_table_privilege(current_user, 'platform.idempotency_record', 'DELETE'), has_column_privilege(current_user, 'platform.idempotency_record', 'record_status', 'UPDATE'), has_column_privilege(current_user, 'platform.idempotency_record', 'request_hash', 'UPDATE')",
+            privilegeConnection);
+        await using NpgsqlDataReader privilegeReader = await privilegeCommand.ExecuteReaderAsync();
+        Assert(await privilegeReader.ReadAsync(), "Idempotency privilege metadata was not returned.");
+        Assert(privilegeReader.GetBoolean(0) && privilegeReader.GetBoolean(1) && !privilegeReader.GetBoolean(2) &&
+               !privilegeReader.GetBoolean(3) && privilegeReader.GetBoolean(4) && !privilegeReader.GetBoolean(5),
+            "Runtime idempotency privileges do not match select/insert/column-complete-only policy.");
+    }
+
+    private static async Task<IdempotencyRecord> ExecuteIdempotentProbeAsync(
+        NpgsqlDataSource dataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid actorId,
+        string commandName,
+        string key,
+        string requestHash,
+        Guid aggregateId)
+    {
+        var scope = new ExecutionScope(tenantId, actorId, [companyId]);
+        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+        IdempotencyRecord acquired = await PostgresIdempotencyWriter.AcquireAsync(
+            connection, transaction, scope, companyId, Guid.CreateVersion7(), commandName, key, requestHash);
+        IdempotencyRecord result = acquired;
+        if (acquired.Created)
+        {
+            result = await PostgresIdempotencyWriter.CompleteAsync(
+                connection,
+                transaction,
+                scope,
+                acquired,
+                201,
+                $"{{\"id\":\"{aggregateId:D}\",\"status\":\"prepared\"}}",
+                aggregateId);
+        }
+
+        await transaction.CommitAsync();
+        return result;
+    }
+
+    private static async Task AssertAuthoritativeJournalAccountEvidenceAsync(
+        NpgsqlDataSource migratorDataSource,
+        NpgsqlDataSource appDataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid otherCompanyId,
+        Guid actorId)
+    {
+        Guid chartVersionId = Guid.CreateVersion7();
+        Guid debitAccountId = Guid.CreateVersion7();
+        Guid creditAccountId = Guid.CreateVersion7();
+        Guid summaryAccountId = Guid.CreateVersion7();
+        Guid inactiveAccountId = Guid.CreateVersion7();
+        await SeedAccountPostingEvidenceAsync(
+            migratorDataSource,
+            tenantId,
+            companyId,
+            actorId,
+            chartVersionId,
+            [(debitAccountId, AccountKind.Posting, true), (creditAccountId, AccountKind.Posting, true),
+             (summaryAccountId, AccountKind.Summary, true), (inactiveAccountId, AccountKind.Posting, false)]);
+
+        var scope = new ExecutionScope(tenantId, actorId, [companyId]);
+        ValidatedJournalDraft validDraft = CreateIntegrationJournalDraft(
+            tenantId, companyId, Guid.CreateVersion7(), Guid.CreateVersion7(),
+            debitAccountId, creditAccountId, 12m, reverseLineOrder: false);
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            ValidatedJournalAccountSet loaded = await PostgresAuthoritativeJournalAccountLoader.LoadAsync(
+                connection, transaction, scope, validDraft, chartVersionId);
+            Assert(loaded.Accounts.Count == 2 && loaded.Accounts.All(account => account.IsActive && account.Kind == AccountKind.Posting),
+                "Authoritative account loader did not return both active posting accounts.");
+            await transaction.CommitAsync();
+        }
+
+        await AssertAccountEvidenceRejectedAsync(
+            appDataSource,
+            scope,
+            CreateIntegrationJournalDraft(tenantId, companyId, Guid.CreateVersion7(), Guid.CreateVersion7(),
+                summaryAccountId, creditAccountId, 13m, false),
+            chartVersionId,
+            tenantId,
+            companyId,
+            actorId,
+            "JOURNAL_ACCOUNT_NOT_POSTABLE");
+        await AssertAccountEvidenceRejectedAsync(
+            appDataSource,
+            scope,
+            CreateIntegrationJournalDraft(tenantId, companyId, Guid.CreateVersion7(), Guid.CreateVersion7(),
+                inactiveAccountId, creditAccountId, 14m, false),
+            chartVersionId,
+            tenantId,
+            companyId,
+            actorId,
+            "JOURNAL_ACCOUNT_INACTIVE");
+
+        ValidatedJournalDraft missingDraft = CreateIntegrationJournalDraft(
+            tenantId, companyId, Guid.CreateVersion7(), Guid.CreateVersion7(),
+            Guid.CreateVersion7(), creditAccountId, 15m, false);
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            AuthoritativeAccountEvidenceException exception = await ThrowsAsync<AuthoritativeAccountEvidenceException>(() =>
+                PostgresAuthoritativeJournalAccountLoader.LoadAsync(
+                    connection, transaction, scope, missingDraft, chartVersionId).AsTask());
+            Assert(exception.Code == "ACCOUNT_EVIDENCE_INCOMPLETE", "Missing account evidence returned the wrong code.");
+            await transaction.RollbackAsync();
+        }
+
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, otherCompanyId);
+            AuthoritativeAccountEvidenceException exception = await ThrowsAsync<AuthoritativeAccountEvidenceException>(() =>
+                PostgresAuthoritativeJournalAccountLoader.LoadAsync(
+                    connection, transaction, scope, validDraft, chartVersionId).AsTask());
+            Assert(exception.Code == "ACCOUNT_CHART_VERSION_NOT_FOUND", "Cross-company chart evidence did not fail closed.");
+            await transaction.RollbackAsync();
+        }
+
+        await using NpgsqlConnection privilegeConnection = await appDataSource.OpenConnectionAsync();
+        await using var privilegeCommand = new NpgsqlCommand(
+            "SELECT has_table_privilege(current_user, 'accounting.chart_of_accounts_version', 'SELECT'), has_table_privilege(current_user, 'accounting.chart_of_accounts_version', 'INSERT'), has_table_privilege(current_user, 'accounting.account_posting_snapshot', 'SELECT'), has_table_privilege(current_user, 'accounting.account_posting_snapshot', 'UPDATE')",
+            privilegeConnection);
+        await using NpgsqlDataReader reader = await privilegeCommand.ExecuteReaderAsync();
+        Assert(await reader.ReadAsync(), "Account evidence privilege metadata was not returned.");
+        Assert(reader.GetBoolean(0) && !reader.GetBoolean(1) && reader.GetBoolean(2) && !reader.GetBoolean(3),
+            "Runtime account evidence privileges are not read-only.");
+    }
+
+    private static async Task AssertAccountEvidenceRejectedAsync(
+        NpgsqlDataSource dataSource,
+        ExecutionScope scope,
+        ValidatedJournalDraft draft,
+        Guid chartVersionId,
+        Guid tenantId,
+        Guid companyId,
+        Guid actorId,
+        string expectedCode)
+    {
+        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+        AccountInvariantException exception = await ThrowsAsync<AccountInvariantException>(() =>
+            PostgresAuthoritativeJournalAccountLoader.LoadAsync(
+                connection, transaction, scope, draft, chartVersionId).AsTask());
+        Assert(exception.Code == expectedCode, "Account postability evidence returned the wrong invariant code.");
+        await transaction.RollbackAsync();
+    }
+
+    private static async Task SeedAccountPostingEvidenceAsync(
+        NpgsqlDataSource dataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid actorId,
+        Guid chartVersionId,
+        IEnumerable<(Guid AccountId, AccountKind Kind, bool IsActive)> accounts)
+    {
+        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await ExecuteAsync(connection, transaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+        await using (var chart = new NpgsqlCommand(
+            "INSERT INTO accounting.chart_of_accounts_version (chart_version_id, tenant_id, company_id, version, created_by) SELECT $1, $2, $3, COALESCE(MAX(version), 0) + 1, $4 FROM accounting.chart_of_accounts_version WHERE tenant_id = $2 AND company_id = $3",
+            connection,
+            transaction))
+        {
+            chart.Parameters.AddWithValue(chartVersionId);
+            chart.Parameters.AddWithValue(tenantId);
+            chart.Parameters.AddWithValue(companyId);
+            chart.Parameters.AddWithValue(actorId);
+            await chart.ExecuteNonQueryAsync();
+        }
+
+        foreach ((Guid accountId, AccountKind kind, bool isActive) in accounts)
+        {
+            await using var account = new NpgsqlCommand(
+                "INSERT INTO accounting.account_posting_snapshot (tenant_id, company_id, chart_version_id, account_id, account_kind, is_active, version, created_by) VALUES ($1, $2, $3, $4, $5, $6, 1, $7)",
+                connection,
+                transaction);
+            account.Parameters.AddWithValue(tenantId);
+            account.Parameters.AddWithValue(companyId);
+            account.Parameters.AddWithValue(chartVersionId);
+            account.Parameters.AddWithValue(accountId);
+            account.Parameters.AddWithValue((short)kind);
+            account.Parameters.AddWithValue(isActive);
+            account.Parameters.AddWithValue(actorId);
+            await account.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
+    }
+
+    private static async Task AssertAuthoritativeJournalDimensionEvidenceAsync(
+        NpgsqlDataSource migratorDataSource,
+        NpgsqlDataSource appDataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid otherCompanyId,
+        Guid actorId)
+    {
+        JournalPreparationRequest valid = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 21m, hasPostingPermission: true);
+        Guid assignedDimensionId = valid.Draft.Lines[0].Dimensions.Single().DimensionId;
+        await SeedDimensionRequirementAsync(
+            migratorDataSource, tenantId, companyId, actorId,
+            valid.Draft.PostingRuleVersionId, [assignedDimensionId]);
+        var scope = new ExecutionScope(tenantId, actorId, [companyId]);
+
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            ValidatedJournalDimensions loaded = await PostgresAuthoritativeJournalDimensionLoader.LoadAsync(
+                connection, transaction, scope, valid.Draft);
+            Assert(loaded.RequirementSnapshot.RequiredDimensionIds.SequenceEqual([assignedDimensionId]),
+                "Authoritative dimension loader returned the wrong requirement set.");
+            await transaction.CommitAsync();
+        }
+
+        JournalPreparationRequest missing = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 22m, hasPostingPermission: true);
+        await SeedDimensionRequirementAsync(
+            migratorDataSource, tenantId, companyId, actorId,
+            missing.Draft.PostingRuleVersionId, [Guid.CreateVersion7()]);
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            DimensionInvariantException exception = await ThrowsAsync<DimensionInvariantException>(() =>
+                PostgresAuthoritativeJournalDimensionLoader.LoadAsync(
+                    connection, transaction, scope, missing.Draft).AsTask());
+            Assert(exception.Code == "JOURNAL_DIMENSION_REQUIRED", "Missing required dimension returned the wrong code.");
+            await transaction.RollbackAsync();
+        }
+
+        JournalPreparationRequest absent = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 23m, hasPostingPermission: true);
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            AuthoritativeDimensionEvidenceException exception = await ThrowsAsync<AuthoritativeDimensionEvidenceException>(() =>
+                PostgresAuthoritativeJournalDimensionLoader.LoadAsync(
+                    connection, transaction, scope, absent.Draft).AsTask());
+            Assert(exception.Code == "DIMENSION_REQUIREMENT_SET_NOT_FOUND", "Missing requirement set returned the wrong code.");
+            await transaction.RollbackAsync();
+        }
+
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, otherCompanyId);
+            await ThrowsAsync<AuthoritativeDimensionEvidenceException>(() =>
+                PostgresAuthoritativeJournalDimensionLoader.LoadAsync(
+                    connection, transaction, scope, valid.Draft).AsTask());
+            await transaction.RollbackAsync();
+        }
+
+        await using NpgsqlConnection privilegeConnection = await appDataSource.OpenConnectionAsync();
+        await using var privilegeCommand = new NpgsqlCommand(
+            "SELECT has_table_privilege(current_user, 'accounting.posting_dimension_requirement_set', 'SELECT'), has_table_privilege(current_user, 'accounting.posting_dimension_requirement_set', 'INSERT'), has_table_privilege(current_user, 'accounting.posting_dimension_requirement', 'SELECT'), has_table_privilege(current_user, 'accounting.posting_dimension_requirement', 'UPDATE')",
+            privilegeConnection);
+        await using NpgsqlDataReader reader = await privilegeCommand.ExecuteReaderAsync();
+        Assert(await reader.ReadAsync(), "Dimension evidence privilege metadata was not returned.");
+        Assert(reader.GetBoolean(0) && !reader.GetBoolean(1) && reader.GetBoolean(2) && !reader.GetBoolean(3),
+            "Runtime dimension evidence privileges are not read-only.");
+    }
+
+    private static async Task SeedDimensionRequirementAsync(
+        NpgsqlDataSource dataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid actorId,
+        Guid postingRuleVersionId,
+        IEnumerable<Guid> dimensionIds)
+    {
+        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await ExecuteAsync(connection, transaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+        await using (var setCommand = new NpgsqlCommand(
+            "INSERT INTO accounting.posting_dimension_requirement_set (tenant_id, company_id, posting_rule_version_id, version, created_by) VALUES ($1, $2, $3, 1, $4)",
+            connection,
+            transaction))
+        {
+            setCommand.Parameters.AddWithValue(tenantId);
+            setCommand.Parameters.AddWithValue(companyId);
+            setCommand.Parameters.AddWithValue(postingRuleVersionId);
+            setCommand.Parameters.AddWithValue(actorId);
+            await setCommand.ExecuteNonQueryAsync();
+        }
+
+        foreach (Guid dimensionId in dimensionIds)
+        {
+            await using var lineCommand = new NpgsqlCommand(
+                "INSERT INTO accounting.posting_dimension_requirement (tenant_id, company_id, posting_rule_version_id, dimension_id) VALUES ($1, $2, $3, $4)",
+                connection,
+                transaction);
+            lineCommand.Parameters.AddWithValue(tenantId);
+            lineCommand.Parameters.AddWithValue(companyId);
+            lineCommand.Parameters.AddWithValue(postingRuleVersionId);
+            lineCommand.Parameters.AddWithValue(dimensionId);
+            await lineCommand.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
+    }
+
+    private static async Task AssertAuthoritativeJournalCurrencyEvidenceAsync(
+        NpgsqlDataSource migratorDataSource,
+        NpgsqlDataSource appDataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid otherCompanyId,
+        Guid actorId)
+    {
+        JournalPreparationRequest valid = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 31m, hasPostingPermission: true);
+        await SeedCurrencyEvidenceAsync(migratorDataSource, valid, actorId, numeratorOverride: null);
+        var scope = new ExecutionScope(tenantId, actorId, [companyId]);
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            ValidatedJournalCurrencySet loaded = await PostgresAuthoritativeJournalCurrencyLoader.LoadAsync(
+                connection, transaction, scope, valid.Draft);
+            Assert(loaded.LineAmounts.Count == valid.Draft.Lines.Count,
+                "Authoritative currency loader did not validate every journal line.");
+            await transaction.CommitAsync();
+        }
+
+        JournalPreparationRequest tampered = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 32m, hasPostingPermission: true);
+        await SeedCurrencyEvidenceAsync(migratorDataSource, tampered, actorId, numeratorOverride: 2m);
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            AuthoritativeCurrencyEvidenceException exception = await ThrowsAsync<AuthoritativeCurrencyEvidenceException>(() =>
+                PostgresAuthoritativeJournalCurrencyLoader.LoadAsync(
+                    connection, transaction, scope, tampered.Draft).AsTask());
+            Assert(exception.Code == "EXCHANGE_RATE_EVIDENCE_MISMATCH", "Changed rate evidence returned the wrong code.");
+            await transaction.RollbackAsync();
+        }
+
+        JournalPreparationRequest absent = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 33m, hasPostingPermission: true);
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            await ThrowsAsync<AuthoritativeCurrencyEvidenceException>(() =>
+                PostgresAuthoritativeJournalCurrencyLoader.LoadAsync(
+                    connection, transaction, scope, absent.Draft).AsTask());
+            await transaction.RollbackAsync();
+        }
+
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, otherCompanyId);
+            await ThrowsAsync<AuthoritativeCurrencyEvidenceException>(() =>
+                PostgresAuthoritativeJournalCurrencyLoader.LoadAsync(
+                    connection, transaction, scope, valid.Draft).AsTask());
+            await transaction.RollbackAsync();
+        }
+
+        await using NpgsqlConnection privilegeConnection = await appDataSource.OpenConnectionAsync();
+        await using var privilegeCommand = new NpgsqlCommand(
+            "SELECT has_table_privilege(current_user, 'accounting.exchange_rate_snapshot', 'SELECT'), has_table_privilege(current_user, 'accounting.exchange_rate_snapshot', 'INSERT'), has_table_privilege(current_user, 'accounting.rounding_policy_snapshot', 'SELECT'), has_table_privilege(current_user, 'accounting.rounding_policy_snapshot', 'UPDATE')",
+            privilegeConnection);
+        await using NpgsqlDataReader reader = await privilegeCommand.ExecuteReaderAsync();
+        Assert(await reader.ReadAsync(), "Currency evidence privilege metadata was not returned.");
+        Assert(reader.GetBoolean(0) && !reader.GetBoolean(1) && reader.GetBoolean(2) && !reader.GetBoolean(3),
+            "Runtime currency evidence privileges are not read-only.");
+    }
+
+    private static async Task SeedCurrencyEvidenceAsync(
+        NpgsqlDataSource dataSource,
+        JournalPreparationRequest request,
+        Guid actorId,
+        decimal? numeratorOverride)
+    {
+        JournalCurrencyAmountSnapshot amount = request.Draft.Lines[0].CurrencyAmount
+            ?? throw new InvalidOperationException("Currency evidence fixture requires a line snapshot.");
+        ExchangeRateSnapshot rate = amount.ExchangeRate;
+        RoundingPolicySnapshot policy = amount.RoundingPolicy;
+        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await ExecuteAsync(connection, transaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+        await using (var rateCommand = new NpgsqlCommand(
+            "INSERT INTO accounting.exchange_rate_snapshot (tenant_id, company_id, rate_snapshot_id, version, transaction_currency, functional_currency, rate_type, source, rate_date, functional_units_numerator, transaction_units_denominator, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+            connection,
+            transaction))
+        {
+            rateCommand.Parameters.AddWithValue(rate.TenantId);
+            rateCommand.Parameters.AddWithValue(rate.CompanyId);
+            rateCommand.Parameters.AddWithValue(rate.RateSnapshotId);
+            rateCommand.Parameters.AddWithValue(rate.Version);
+            rateCommand.Parameters.AddWithValue(rate.TransactionCurrency.Value);
+            rateCommand.Parameters.AddWithValue(rate.FunctionalCurrency.Value);
+            rateCommand.Parameters.AddWithValue(rate.RateType);
+            rateCommand.Parameters.AddWithValue(rate.Source);
+            rateCommand.Parameters.AddWithValue(rate.RateDate);
+            rateCommand.Parameters.AddWithValue(numeratorOverride ?? rate.FunctionalUnitsNumerator);
+            rateCommand.Parameters.AddWithValue(rate.TransactionUnitsDenominator);
+            rateCommand.Parameters.AddWithValue(actorId);
+            await rateCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var policyCommand = new NpgsqlCommand(
+            "INSERT INTO accounting.rounding_policy_snapshot (tenant_id, company_id, policy_id, version, scale, rounding_mode, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+            connection,
+            transaction))
+        {
+            policyCommand.Parameters.AddWithValue(policy.TenantId);
+            policyCommand.Parameters.AddWithValue(policy.CompanyId);
+            policyCommand.Parameters.AddWithValue(policy.PolicyId);
+            policyCommand.Parameters.AddWithValue(policy.Version);
+            policyCommand.Parameters.AddWithValue((short)policy.Scale);
+            policyCommand.Parameters.AddWithValue((short)policy.Mode);
+            policyCommand.Parameters.AddWithValue(actorId);
+            await policyCommand.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
     }
 
     private static async Task SeedAsync(
@@ -541,6 +1128,1486 @@ internal static class DatabaseIntegrationCheck
         Assert(!reader.GetBoolean(2), "Runtime role must not own business tables.");
     }
 
+    private static async Task AssertJournalSourceReservationAsync(
+        NpgsqlDataSource migratorDataSource,
+        NpgsqlDataSource appDataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid otherCompanyId,
+        Guid actorId)
+    {
+        Guid sourceEventId = Guid.CreateVersion7();
+        Guid firstReservationId = Guid.CreateVersion7();
+        Guid secondReservationId = Guid.CreateVersion7();
+        const string sourceType = "sales.invoice";
+        const string postingPurpose = "party-receivable";
+        const string draftHash = "1111111111111111111111111111111111111111111111111111111111111111";
+
+        int[] raceResults = await Task.WhenAll(
+            InsertJournalSourceReservationAsync(
+                appDataSource,
+                tenantId,
+                companyId,
+                actorId,
+                firstReservationId,
+                sourceType,
+                sourceEventId,
+                postingPurpose,
+                draftHash,
+                ignoreDuplicate: true),
+            InsertJournalSourceReservationAsync(
+                appDataSource,
+                tenantId,
+                companyId,
+                actorId,
+                secondReservationId,
+                sourceType,
+                sourceEventId,
+                postingPurpose,
+                draftHash,
+                ignoreDuplicate: true));
+        Assert(raceResults.Sum() == 1, "Parallel journal-source reservation did not produce exactly one insert.");
+
+        await using (NpgsqlConnection ownerConnection = await migratorDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction ownerTransaction = await ownerConnection.BeginTransactionAsync())
+        {
+            await ExecuteAsync(ownerConnection, ownerTransaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+            const string sql = """
+                SELECT reservation_id, journal_draft_hash
+                FROM accounting.journal_source_reservation
+                WHERE tenant_id = $1
+                  AND company_id = $2
+                  AND source_type = $3
+                  AND source_event_id = $4
+                  AND posting_purpose = $5
+                """;
+            await using (var command = new NpgsqlCommand(sql, ownerConnection, ownerTransaction))
+            {
+                command.Parameters.AddWithValue(tenantId);
+                command.Parameters.AddWithValue(companyId);
+                command.Parameters.AddWithValue(sourceType);
+                command.Parameters.AddWithValue(sourceEventId);
+                command.Parameters.AddWithValue(postingPurpose);
+                await using NpgsqlDataReader reader = await command.ExecuteReaderAsync();
+                Assert(await reader.ReadAsync(), "Parallel journal-source reservation did not persist a row.");
+                Guid storedReservationId = reader.GetGuid(0);
+                Assert(storedReservationId == firstReservationId || storedReservationId == secondReservationId,
+                    "Journal-source reservation persisted an unexpected identity.");
+                Assert(reader.GetString(1) == draftHash, "Journal-source reservation hash changed.");
+                Assert(!await reader.ReadAsync(), "Parallel journal-source reservation persisted multiple rows.");
+            }
+
+            await ownerTransaction.CommitAsync();
+        }
+
+        bool conflictingDraftRejected = false;
+        try
+        {
+            await InsertJournalSourceReservationAsync(
+                appDataSource,
+                tenantId,
+                companyId,
+                actorId,
+                Guid.CreateVersion7(),
+                sourceType,
+                sourceEventId,
+                postingPurpose,
+                "2222222222222222222222222222222222222222222222222222222222222222",
+                ignoreDuplicate: false);
+        }
+        catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            conflictingDraftRejected = true;
+        }
+
+        Assert(conflictingDraftRejected, "Conflicting journal draft reused an existing source reservation.");
+
+        Assert(await InsertJournalSourceReservationAsync(
+                appDataSource,
+                tenantId,
+                otherCompanyId,
+                actorId,
+                Guid.CreateVersion7(),
+                sourceType,
+                sourceEventId,
+                postingPurpose,
+                draftHash,
+                ignoreDuplicate: false) == 1,
+            "The same source identity did not remain isolated by company.");
+
+        bool crossCompanyRejected = false;
+        await using (NpgsqlConnection crossCompanyConnection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction crossCompanyTransaction = await crossCompanyConnection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(crossCompanyConnection, crossCompanyTransaction, tenantId, actorId, companyId);
+            try
+            {
+                await InsertJournalSourceReservationCommandAsync(
+                    crossCompanyConnection,
+                    crossCompanyTransaction,
+                    tenantId,
+                    otherCompanyId,
+                    actorId,
+                    Guid.CreateVersion7(),
+                    sourceType,
+                    Guid.CreateVersion7(),
+                    postingPurpose,
+                    draftHash,
+                    ignoreDuplicate: false);
+            }
+            catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.InsufficientPrivilege)
+            {
+                crossCompanyRejected = true;
+            }
+        }
+
+        Assert(crossCompanyRejected, "Journal-source reservation RLS accepted a company outside request scope.");
+
+        await using (NpgsqlConnection privilegeConnection = await appDataSource.OpenConnectionAsync())
+        await using (var privilegeCommand = new NpgsqlCommand(
+            """
+            SELECT
+                has_table_privilege(current_user, 'accounting.journal_source_reservation', 'SELECT'),
+                has_table_privilege(current_user, 'accounting.journal_source_reservation', 'INSERT'),
+                has_table_privilege(current_user, 'accounting.journal_source_reservation', 'UPDATE'),
+                has_table_privilege(current_user, 'accounting.journal_source_reservation', 'DELETE')
+            """,
+            privilegeConnection))
+        await using (NpgsqlDataReader privilegeReader = await privilegeCommand.ExecuteReaderAsync())
+        {
+            Assert(await privilegeReader.ReadAsync(), "Journal-source reservation privilege metadata was not returned.");
+            Assert(privilegeReader.GetBoolean(0) && privilegeReader.GetBoolean(1),
+                "Runtime role cannot read and append journal-source reservations.");
+            Assert(!privilegeReader.GetBoolean(2) && !privilegeReader.GetBoolean(3),
+                "Runtime role can mutate or delete journal-source reservations.");
+        }
+
+        await AssertJournalSourceMutationRejectedAsync(
+            appDataSource,
+            tenantId,
+            companyId,
+            actorId,
+            "UPDATE accounting.journal_source_reservation SET journal_draft_hash = journal_draft_hash WHERE source_event_id = $1",
+            sourceEventId,
+            "Runtime role updated an append-only journal-source reservation.");
+        await AssertJournalSourceMutationRejectedAsync(
+            appDataSource,
+            tenantId,
+            companyId,
+            actorId,
+            "DELETE FROM accounting.journal_source_reservation WHERE source_event_id = $1",
+            sourceEventId,
+            "Runtime role deleted an append-only journal-source reservation.");
+    }
+
+    private static async Task AssertJournalSourceMutationRejectedAsync(
+        NpgsqlDataSource dataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid actorId,
+        string sql,
+        Guid sourceEventId,
+        string failureMessage)
+    {
+        bool rejected = false;
+        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        command.Parameters.AddWithValue(sourceEventId);
+        try
+        {
+            await command.ExecuteNonQueryAsync();
+        }
+        catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.InsufficientPrivilege)
+        {
+            rejected = true;
+        }
+
+        Assert(rejected, failureMessage);
+    }
+
+    private static async Task<int> InsertJournalSourceReservationAsync(
+        NpgsqlDataSource dataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid actorId,
+        Guid reservationId,
+        string sourceType,
+        Guid sourceEventId,
+        string postingPurpose,
+        string draftHash,
+        bool ignoreDuplicate)
+    {
+        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+        int inserted = await InsertJournalSourceReservationCommandAsync(
+            connection,
+            transaction,
+            tenantId,
+            companyId,
+            actorId,
+            reservationId,
+            sourceType,
+            sourceEventId,
+            postingPurpose,
+            draftHash,
+            ignoreDuplicate);
+        await transaction.CommitAsync();
+        return inserted;
+    }
+
+    private static async Task<int> InsertJournalSourceReservationCommandAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid tenantId,
+        Guid companyId,
+        Guid actorId,
+        Guid reservationId,
+        string sourceType,
+        Guid sourceEventId,
+        string postingPurpose,
+        string draftHash,
+        bool ignoreDuplicate)
+    {
+        string sql = """
+            INSERT INTO accounting.journal_source_reservation
+                (reservation_id, tenant_id, company_id, source_type, source_event_id,
+                 posting_purpose, journal_draft_hash, reserved_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            """ + (ignoreDuplicate
+                ? " ON CONFLICT (tenant_id, company_id, source_type, source_event_id, posting_purpose) DO NOTHING"
+                : string.Empty);
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        command.Parameters.AddWithValue(reservationId);
+        command.Parameters.AddWithValue(tenantId);
+        command.Parameters.AddWithValue(companyId);
+        command.Parameters.AddWithValue(sourceType);
+        command.Parameters.AddWithValue(sourceEventId);
+        command.Parameters.AddWithValue(postingPurpose);
+        command.Parameters.AddWithValue(draftHash);
+        command.Parameters.AddWithValue(actorId);
+        return await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task AssertJournalSourceReservationWriterAsync(
+        NpgsqlDataSource migratorDataSource,
+        NpgsqlDataSource appDataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid otherCompanyId,
+        Guid actorId)
+    {
+        Guid sourceEventId = Guid.CreateVersion7();
+        Guid postingRuleVersionId = Guid.CreateVersion7();
+        Guid debitAccountId = Guid.CreateVersion7();
+        Guid creditAccountId = Guid.CreateVersion7();
+        Guid firstReservationId = Guid.CreateVersion7();
+        var scope = new ExecutionScope(tenantId, actorId, [companyId]);
+        ValidatedJournalDraft draft = CreateIntegrationJournalDraft(
+            tenantId,
+            companyId,
+            sourceEventId,
+            postingRuleVersionId,
+            debitAccountId,
+            creditAccountId,
+            amount: 100m,
+            reverseLineOrder: false);
+        ValidatedJournalDraft reorderedRetry = CreateIntegrationJournalDraft(
+            tenantId,
+            companyId,
+            sourceEventId,
+            postingRuleVersionId,
+            debitAccountId,
+            creditAccountId,
+            amount: 100.0000m,
+            reverseLineOrder: true);
+
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            JournalSourceReservationResult created = await PostgresJournalSourceReservationWriter.ReserveAsync(
+                connection,
+                transaction,
+                scope,
+                firstReservationId,
+                draft);
+            JournalSourceReservationResult retried = await PostgresJournalSourceReservationWriter.ReserveAsync(
+                connection,
+                transaction,
+                scope,
+                Guid.CreateVersion7(),
+                reorderedRetry);
+
+            Assert(created.Created && created.ReservationId == firstReservationId,
+                "Journal-source writer did not create the first reservation.");
+            Assert(!retried.Created && retried.ReservationId == firstReservationId,
+                "Equivalent reordered journal retry did not return the first reservation.");
+            Assert(created.DraftHash == retried.DraftHash,
+                "Equivalent reordered journal lines produced different V1 fingerprints.");
+
+            bool changedDraftRejected = false;
+            try
+            {
+                await PostgresJournalSourceReservationWriter.ReserveAsync(
+                    connection,
+                    transaction,
+                    scope,
+                    Guid.CreateVersion7(),
+                    CreateIntegrationJournalDraft(
+                        tenantId,
+                        companyId,
+                        sourceEventId,
+                        postingRuleVersionId,
+                        debitAccountId,
+                        creditAccountId,
+                        amount: 100.0001m,
+                        reverseLineOrder: false));
+            }
+            catch (JournalSourceReservationConflictException exception)
+                when (exception.ExistingReservationId == firstReservationId)
+            {
+                changedDraftRejected = true;
+            }
+
+            Assert(changedDraftRejected, "Changed journal content reused an existing source reservation.");
+            await transaction.CommitAsync();
+        }
+
+        await using (NpgsqlConnection deniedConnection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction deniedTransaction = await deniedConnection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(deniedConnection, deniedTransaction, tenantId, actorId, companyId);
+            bool deniedBeforeSql = false;
+            try
+            {
+                await PostgresJournalSourceReservationWriter.ReserveAsync(
+                    deniedConnection,
+                    deniedTransaction,
+                    scope,
+                    Guid.CreateVersion7(),
+                    CreateIntegrationJournalDraft(
+                        tenantId,
+                        otherCompanyId,
+                        Guid.CreateVersion7(),
+                        postingRuleVersionId,
+                        debitAccountId,
+                        creditAccountId,
+                        amount: 1m,
+                        reverseLineOrder: false));
+            }
+            catch (ExecutionScopeDeniedException)
+            {
+                deniedBeforeSql = true;
+            }
+
+            Assert(deniedBeforeSql, "Journal-source writer accepted a draft outside the execution scope.");
+            await deniedTransaction.RollbackAsync();
+        }
+
+        Guid rolledBackReservationId = Guid.CreateVersion7();
+        await using (NpgsqlConnection rollbackConnection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction rollbackTransaction = await rollbackConnection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(rollbackConnection, rollbackTransaction, tenantId, actorId, companyId);
+            JournalSourceReservationResult rolledBack = await PostgresJournalSourceReservationWriter.ReserveAsync(
+                rollbackConnection,
+                rollbackTransaction,
+                scope,
+                rolledBackReservationId,
+                CreateIntegrationJournalDraft(
+                    tenantId,
+                    companyId,
+                    Guid.CreateVersion7(),
+                    Guid.CreateVersion7(),
+                    debitAccountId,
+                    creditAccountId,
+                    amount: 25m,
+                    reverseLineOrder: false));
+            Assert(rolledBack.Created, "Rollback probe did not create its reservation inside the transaction.");
+            await rollbackTransaction.RollbackAsync();
+        }
+
+        await using NpgsqlConnection ownerConnection = await migratorDataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction ownerTransaction = await ownerConnection.BeginTransactionAsync();
+        await ExecuteAsync(ownerConnection, ownerTransaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+        Assert(await CountAsync(
+                ownerConnection,
+                ownerTransaction,
+                "SELECT count(*) FROM accounting.journal_source_reservation WHERE reservation_id = $1",
+                rolledBackReservationId) == 0,
+            "Journal-source reservation escaped its caller-owned rollback.");
+        await ownerTransaction.CommitAsync();
+    }
+
+    private static ValidatedJournalDraft CreateIntegrationJournalDraft(
+        Guid tenantId,
+        Guid companyId,
+        Guid sourceEventId,
+        Guid postingRuleVersionId,
+        Guid debitAccountId,
+        Guid creditAccountId,
+        decimal amount,
+        bool reverseLineOrder)
+    {
+        JournalLineDraft debit = JournalLineDraft.Create(debitAccountId, null, JournalAmount.Create(amount, 0m));
+        JournalLineDraft credit = JournalLineDraft.Create(creditAccountId, null, JournalAmount.Create(0m, amount));
+        JournalLineDraft[] lines = reverseLineOrder ? [credit, debit] : [debit, credit];
+        return ValidatedJournalDraft.Create(
+            tenantId,
+            companyId,
+            sourceEventId,
+            postingRuleVersionId,
+            "integration.invoice",
+            "party-receivable",
+            new DateOnly(2026, 8, 24),
+            new DateTimeOffset(2026, 8, 24, 12, 0, 0, TimeSpan.Zero),
+            CurrencyCode.Create("GBP"),
+            lines);
+    }
+
+    private static async Task AssertAuthoritativePeriodPostingGateAsync(
+        NpgsqlDataSource migratorDataSource,
+        NpgsqlDataSource appDataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid otherCompanyId,
+        Guid actorId)
+    {
+        Guid periodId = Guid.CreateVersion7();
+        await InsertAccountingPeriodAsync(
+            migratorDataSource,
+            periodId,
+            tenantId,
+            companyId,
+            "2026-08",
+            new DateOnly(2026, 8, 1),
+            new DateOnly(2026, 8, 31),
+            actorId);
+
+        var scope = new ExecutionScope(tenantId, actorId, [companyId]);
+        ValidatedJournalDraft draft = CreateIntegrationJournalDraft(
+            tenantId,
+            companyId,
+            Guid.CreateVersion7(),
+            Guid.CreateVersion7(),
+            Guid.CreateVersion7(),
+            Guid.CreateVersion7(),
+            10m,
+            reverseLineOrder: false);
+
+        await using (NpgsqlConnection appConnection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction appTransaction = await appConnection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(appConnection, appTransaction, tenantId, actorId, companyId);
+            ValidatedPeriodLockSet loaded = await PostgresAuthoritativePeriodGateLoader.LoadForStandardPostingAsync(
+                appConnection,
+                appTransaction,
+                scope,
+                draft);
+            Assert(loaded.PeriodId == periodId, "Authoritative period gate loaded the wrong period.");
+            Assert(loaded.Locks.Count == 2, "Authoritative period gate did not load both required lock scopes.");
+
+            await using NpgsqlConnection ownerConnection = await migratorDataSource.OpenConnectionAsync();
+            await using NpgsqlTransaction ownerTransaction = await ownerConnection.BeginTransactionAsync();
+            await ExecuteAsync(ownerConnection, ownerTransaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+            await using (var lockCommand = new NpgsqlCommand(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))",
+                ownerConnection,
+                ownerTransaction))
+            {
+                lockCommand.Parameters.AddWithValue($"kagu-accounting-period:{periodId:D}");
+                Assert(await lockCommand.ExecuteScalarAsync() is false,
+                    "Concurrent period close acquired the posting transaction's period lock.");
+            }
+
+            await ownerTransaction.RollbackAsync();
+            await appTransaction.CommitAsync();
+        }
+
+        ValidatedJournalDraft missingPeriodDraft = ValidatedJournalDraft.Create(
+            draft.TenantId,
+            draft.CompanyId,
+            Guid.CreateVersion7(),
+            draft.PostingRuleVersionId,
+            draft.SourceType,
+            draft.PostingPurpose,
+            new DateOnly(2027, 1, 1),
+            draft.RecordedAt,
+            draft.FunctionalCurrency,
+            draft.Lines);
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            AuthoritativePeriodGateException exception = await ThrowsAsync<AuthoritativePeriodGateException>(() =>
+                PostgresAuthoritativePeriodGateLoader.LoadForStandardPostingAsync(
+                    connection,
+                    transaction,
+                    scope,
+                    missingPeriodDraft).AsTask());
+            Assert(exception.Code == "ACCOUNTING_PERIOD_NOT_FOUND", "Missing period returned an unexpected error code.");
+            await transaction.RollbackAsync();
+        }
+
+        Guid overlappingPeriodId = Guid.CreateVersion7();
+        await InsertAccountingPeriodAsync(
+            migratorDataSource,
+            overlappingPeriodId,
+            tenantId,
+            companyId,
+            "2026-OVERLAP",
+            new DateOnly(2026, 8, 24),
+            new DateOnly(2026, 8, 25),
+            actorId);
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            AuthoritativePeriodGateException exception = await ThrowsAsync<AuthoritativePeriodGateException>(() =>
+                PostgresAuthoritativePeriodGateLoader.LoadForStandardPostingAsync(
+                    connection,
+                    transaction,
+                    scope,
+                    draft).AsTask());
+            Assert(exception.Code == "ACCOUNTING_PERIOD_AMBIGUOUS", "Overlapping periods did not fail closed.");
+            await transaction.RollbackAsync();
+        }
+
+        await using (NpgsqlConnection ownerConnection = await migratorDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction ownerTransaction = await ownerConnection.BeginTransactionAsync())
+        {
+            await ExecuteAsync(ownerConnection, ownerTransaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+            await using (var deleteLocks = new NpgsqlCommand(
+                "DELETE FROM accounting.period_lock_state WHERE period_id = $1",
+                ownerConnection,
+                ownerTransaction))
+            {
+                deleteLocks.Parameters.AddWithValue(overlappingPeriodId);
+                await deleteLocks.ExecuteNonQueryAsync();
+            }
+
+            await using (var deletePeriod = new NpgsqlCommand(
+                "DELETE FROM accounting.accounting_period WHERE period_id = $1",
+                ownerConnection,
+                ownerTransaction))
+            {
+                deletePeriod.Parameters.AddWithValue(overlappingPeriodId);
+                await deletePeriod.ExecuteNonQueryAsync();
+            }
+
+            await using (var closePeriod = new NpgsqlCommand(
+                "UPDATE accounting.period_lock_state SET close_stage = 1, version = version + 1 WHERE period_id = $1 AND lock_scope = 2",
+                ownerConnection,
+                ownerTransaction))
+            {
+                closePeriod.Parameters.AddWithValue(periodId);
+                await closePeriod.ExecuteNonQueryAsync();
+            }
+
+            await ownerTransaction.CommitAsync();
+        }
+
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            PeriodInvariantException exception = await ThrowsAsync<PeriodInvariantException>(() =>
+                PostgresAuthoritativePeriodGateLoader.LoadForStandardPostingAsync(
+                    connection,
+                    transaction,
+                    scope,
+                    draft).AsTask());
+            Assert(exception.Code == "PERIOD_GL_LOCK_BLOCKS_POSTING", "Closed authoritative period did not fail closed.");
+            await transaction.RollbackAsync();
+        }
+
+        await using (NpgsqlConnection privilegeConnection = await appDataSource.OpenConnectionAsync())
+        await using (var privilegeCommand = new NpgsqlCommand(
+            """
+            SELECT
+                has_table_privilege(current_user, 'accounting.accounting_period', 'SELECT'),
+                has_table_privilege(current_user, 'accounting.accounting_period', 'UPDATE'),
+                has_table_privilege(current_user, 'accounting.period_lock_state', 'SELECT'),
+                has_table_privilege(current_user, 'accounting.period_lock_state', 'UPDATE')
+            """,
+            privilegeConnection))
+        await using (NpgsqlDataReader reader = await privilegeCommand.ExecuteReaderAsync())
+        {
+            Assert(await reader.ReadAsync(), "Period gate privilege metadata was not returned.");
+            Assert(reader.GetBoolean(0) && reader.GetBoolean(2), "Runtime role cannot read period gate state.");
+            Assert(!reader.GetBoolean(1) && !reader.GetBoolean(3), "Runtime role can mutate period gate state.");
+        }
+
+        await using NpgsqlConnection crossScopeConnection = await appDataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction crossScopeTransaction = await crossScopeConnection.BeginTransactionAsync();
+        await SetAuditScopeAsync(crossScopeConnection, crossScopeTransaction, tenantId, actorId, otherCompanyId);
+        Assert(await CountAsync(
+                crossScopeConnection,
+                crossScopeTransaction,
+                "SELECT count(*) FROM accounting.accounting_period WHERE period_id = $1",
+                periodId) == 0,
+            "Accounting period leaked across company scope.");
+        await crossScopeTransaction.CommitAsync();
+
+        await using NpgsqlConnection resetConnection = await migratorDataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction resetTransaction = await resetConnection.BeginTransactionAsync();
+        await ExecuteAsync(resetConnection, resetTransaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+        await using (var resetCommand = new NpgsqlCommand(
+            "UPDATE accounting.period_lock_state SET close_stage = 0, version = version + 1, updated_at = now(), updated_by = $2 WHERE period_id = $1 AND lock_scope = 2",
+            resetConnection,
+            resetTransaction))
+        {
+            resetCommand.Parameters.AddWithValue(periodId);
+            resetCommand.Parameters.AddWithValue(actorId);
+            Assert(await resetCommand.ExecuteNonQueryAsync() == 1, "Authoritative period GL lock was not reset for later checks.");
+        }
+
+        await resetTransaction.CommitAsync();
+    }
+
+    private static async Task AssertJournalPreparationOrchestrationAsync(
+        NpgsqlDataSource migratorDataSource,
+        NpgsqlDataSource appDataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid actorId)
+    {
+        JournalPreparationRequest committedRequest = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 40m, hasPostingPermission: true);
+        await SeedJournalPreparationEvidenceAsync(migratorDataSource, committedRequest, actorId);
+
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            JournalPreparationCommand command = ToJournalPreparationCommand(committedRequest);
+            JournalPreparationResult result = await PostgresJournalPreparationOrchestrator.PrepareFromSourceAsync(
+                connection,
+                transaction,
+                command,
+                (_, _, _, _) => ValueTask.FromResult(new CanonicalJournalPreparationSource(
+                    committedRequest.Draft, committedRequest.ChartOfAccountsVersionId, 1)),
+                AppendJournalPreparationAuditAsync,
+                AppendJournalPreparationOutboxAsync);
+            Assert(result.ReservationCreated && result.DraftCreated,
+                "Journal preparation did not create its reservation and non-posted draft.");
+            await transaction.CommitAsync();
+        }
+
+        await AssertAtomicJournalFactCountsAsync(
+            migratorDataSource,
+            committedRequest.ReservationId,
+            committedRequest.JournalDraftId,
+            committedRequest.AuditEventId,
+            committedRequest.OutboxEventId,
+            1,
+            "Committed journal preparation did not persist all four facts exactly once.");
+
+        JournalPreparationRequest idempotentRequest = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 41m, hasPostingPermission: true);
+        await SeedJournalPreparationEvidenceAsync(migratorDataSource, idempotentRequest, actorId);
+        JournalPreparationCommand idempotentCommand = ToJournalPreparationCommand(idempotentRequest);
+        Guid idempotencyRecordId = Guid.CreateVersion7();
+        string idempotencyKey = $"journal-preparation-{Guid.CreateVersion7():D}";
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            IdempotentJournalPreparationResult first = await PostgresIdempotentJournalPreparationOrchestrator.PrepareAsync(
+                connection,
+                transaction,
+                idempotentCommand,
+                idempotencyRecordId,
+                idempotencyKey,
+                PostgresIdempotencyWriter.AcquireAsync,
+                PostgresIdempotencyWriter.CompleteAsync,
+                (_, _, _, _) => ValueTask.FromResult(new CanonicalJournalPreparationSource(
+                    idempotentRequest.Draft, idempotentRequest.ChartOfAccountsVersionId, 1)),
+                AppendJournalPreparationAuditAsync,
+                AppendJournalPreparationOutboxAsync);
+            Assert(!first.Replayed && first.Preparation.JournalDraftId == idempotentRequest.JournalDraftId,
+                "First idempotent preparation did not create the expected result.");
+            await transaction.CommitAsync();
+        }
+
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            IdempotentJournalPreparationResult replay = await PostgresIdempotentJournalPreparationOrchestrator.PrepareAsync(
+                connection,
+                transaction,
+                idempotentCommand with
+                {
+                    ReservationId = Guid.CreateVersion7(),
+                    JournalDraftId = Guid.CreateVersion7(),
+                    AuditEventId = Guid.CreateVersion7(),
+                    OutboxEventId = Guid.CreateVersion7(),
+                },
+                Guid.CreateVersion7(),
+                idempotencyKey,
+                PostgresIdempotencyWriter.AcquireAsync,
+                PostgresIdempotencyWriter.CompleteAsync,
+                (_, _, _, _) => throw new InvalidOperationException("Replay must not reload the canonical source."),
+                AppendJournalPreparationAuditAsync,
+                AppendJournalPreparationOutboxAsync);
+            Assert(replay.Replayed && replay.Preparation.JournalDraftId == idempotentRequest.JournalDraftId,
+                "Idempotent replay did not return the original preparation response.");
+            await transaction.CommitAsync();
+        }
+
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            IdempotencyKeyReusedException exception = await ThrowsAsync<IdempotencyKeyReusedException>(() =>
+                PostgresIdempotentJournalPreparationOrchestrator.PrepareAsync(
+                    connection,
+                    transaction,
+                    idempotentCommand with { ExpectedSourceVersion = 2 },
+                    Guid.CreateVersion7(),
+                    idempotencyKey,
+                    PostgresIdempotencyWriter.AcquireAsync,
+                    PostgresIdempotencyWriter.CompleteAsync,
+                    (_, _, _, _) => throw new InvalidOperationException("Changed payload must fail before source load."),
+                    AppendJournalPreparationAuditAsync,
+                    AppendJournalPreparationOutboxAsync).AsTask());
+            Assert(exception.Code == "IDEMPOTENCY_KEY_REUSED",
+                "Changed source version did not return the idempotency payload conflict.");
+            await transaction.RollbackAsync();
+        }
+
+        await AssertAtomicJournalFactCountsAsync(
+            migratorDataSource,
+            idempotentRequest.ReservationId,
+            idempotentRequest.JournalDraftId,
+            idempotentRequest.AuditEventId,
+            idempotentRequest.OutboxEventId,
+            1,
+            "Idempotent journal preparation produced duplicate or missing facts.",
+            41m);
+
+        JournalPreparationRequest idempotentRollbackRequest = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 48m, hasPostingPermission: true);
+        await SeedJournalPreparationEvidenceAsync(migratorDataSource, idempotentRollbackRequest, actorId);
+        JournalPreparationCommand rollbackCommand = ToJournalPreparationCommand(idempotentRollbackRequest);
+        Guid rollbackIdempotencyRecordId = Guid.CreateVersion7();
+        string rollbackIdempotencyKey = $"journal-preparation-rollback-{Guid.CreateVersion7():D}";
+        JournalPreparationSourceLoader rollbackSourceLoader = (_, _, _, _) =>
+            ValueTask.FromResult(new CanonicalJournalPreparationSource(
+                idempotentRollbackRequest.Draft, idempotentRollbackRequest.ChartOfAccountsVersionId, 1));
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            _ = await PostgresIdempotentJournalPreparationOrchestrator.PrepareAsync(
+                connection, transaction, rollbackCommand, rollbackIdempotencyRecordId, rollbackIdempotencyKey,
+                PostgresIdempotencyWriter.AcquireAsync, PostgresIdempotencyWriter.CompleteAsync,
+                rollbackSourceLoader, AppendJournalPreparationAuditAsync, AppendJournalPreparationOutboxAsync);
+            await transaction.RollbackAsync();
+        }
+
+        await AssertAtomicJournalFactCountsAsync(
+            migratorDataSource,
+            idempotentRollbackRequest.ReservationId,
+            idempotentRollbackRequest.JournalDraftId,
+            idempotentRollbackRequest.AuditEventId,
+            idempotentRollbackRequest.OutboxEventId,
+            0,
+            "Rolled-back idempotent preparation left a partial journal fact.");
+
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            IdempotentJournalPreparationResult retried = await PostgresIdempotentJournalPreparationOrchestrator.PrepareAsync(
+                connection, transaction, rollbackCommand, rollbackIdempotencyRecordId, rollbackIdempotencyKey,
+                PostgresIdempotencyWriter.AcquireAsync, PostgresIdempotencyWriter.CompleteAsync,
+                rollbackSourceLoader, AppendJournalPreparationAuditAsync, AppendJournalPreparationOutboxAsync);
+            Assert(!retried.Replayed, "Rolled-back idempotency record was incorrectly replayed.");
+            await transaction.CommitAsync();
+        }
+
+        await AssertAtomicJournalFactCountsAsync(
+            migratorDataSource,
+            idempotentRollbackRequest.ReservationId,
+            idempotentRollbackRequest.JournalDraftId,
+            idempotentRollbackRequest.AuditEventId,
+            idempotentRollbackRequest.OutboxEventId,
+            1,
+            "Retry after rollback did not atomically persist journal facts.",
+            48m);
+
+        JournalPreparationRequest rolledBackRequest = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 42m, hasPostingPermission: true);
+        await SeedJournalPreparationEvidenceAsync(migratorDataSource, rolledBackRequest, actorId);
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            await PostgresJournalPreparationOrchestrator.PrepareAsync(
+                connection, transaction, rolledBackRequest, AppendJournalPreparationAuditAsync, AppendJournalPreparationOutboxAsync);
+            await transaction.RollbackAsync();
+        }
+
+        await AssertAtomicJournalFactCountsAsync(
+            migratorDataSource,
+            rolledBackRequest.ReservationId,
+            rolledBackRequest.JournalDraftId,
+            rolledBackRequest.AuditEventId,
+            rolledBackRequest.OutboxEventId,
+            0,
+            "Rolled-back journal preparation left a partial fact.");
+
+        JournalPreparationRequest deniedRequest = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 43m, hasPostingPermission: false);
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            JournalPostingCandidateException exception = await ThrowsAsync<JournalPostingCandidateException>(() =>
+                PostgresJournalPreparationOrchestrator.PrepareAsync(
+                connection, transaction, deniedRequest, AppendJournalPreparationAuditAsync, AppendJournalPreparationOutboxAsync).AsTask());
+            Assert(exception.Code == "JOURNAL_POST_PERMISSION_REQUIRED",
+                "Unauthorized journal preparation returned an unexpected error code.");
+            await transaction.RollbackAsync();
+        }
+
+        await AssertAtomicJournalFactCountsAsync(
+            migratorDataSource,
+            deniedRequest.ReservationId,
+            deniedRequest.JournalDraftId,
+            deniedRequest.AuditEventId,
+            deniedRequest.OutboxEventId,
+            0,
+            "Unauthorized journal preparation persisted a fact.");
+
+        JournalPreparationRequest mismatchedRequest = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 45m, hasPostingPermission: true);
+        JournalPreparationRequest differentSource = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 46m, hasPostingPermission: true);
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            JournalPostingCandidateException exception = await ThrowsAsync<JournalPostingCandidateException>(() =>
+                PostgresJournalPreparationOrchestrator.PrepareFromSourceAsync(
+                    connection,
+                    transaction,
+                    ToJournalPreparationCommand(mismatchedRequest),
+                    (_, _, _, _) => ValueTask.FromResult(new CanonicalJournalPreparationSource(
+                        differentSource.Draft, differentSource.ChartOfAccountsVersionId, 1)),
+                    AppendJournalPreparationAuditAsync,
+                    AppendJournalPreparationOutboxAsync).AsTask());
+            Assert(exception.Code == "JOURNAL_SOURCE_IDENTITY_MISMATCH",
+                "Mismatched canonical journal source returned the wrong code.");
+            await transaction.RollbackAsync();
+        }
+
+        await AssertAtomicJournalFactCountsAsync(
+            migratorDataSource,
+            mismatchedRequest.ReservationId,
+            mismatchedRequest.JournalDraftId,
+            mismatchedRequest.AuditEventId,
+            mismatchedRequest.OutboxEventId,
+            0,
+            "Mismatched canonical journal source persisted a fact.");
+
+        JournalPreparationRequest staleVersionRequest = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 47m, hasPostingPermission: true);
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            JournalPostingCandidateException exception = await ThrowsAsync<JournalPostingCandidateException>(() =>
+                PostgresJournalPreparationOrchestrator.PrepareFromSourceAsync(
+                    connection,
+                    transaction,
+                    ToJournalPreparationCommand(staleVersionRequest),
+                    (_, _, _, _) => ValueTask.FromResult(new CanonicalJournalPreparationSource(
+                        staleVersionRequest.Draft, staleVersionRequest.ChartOfAccountsVersionId, 2)),
+                    AppendJournalPreparationAuditAsync,
+                    AppendJournalPreparationOutboxAsync).AsTask());
+            Assert(exception.Code == "JOURNAL_SOURCE_VERSION_MISMATCH",
+                "Changed canonical source version returned the wrong code.");
+            await transaction.RollbackAsync();
+        }
+
+        await AssertAtomicJournalFactCountsAsync(
+            migratorDataSource,
+            staleVersionRequest.ReservationId,
+            staleVersionRequest.JournalDraftId,
+            staleVersionRequest.AuditEventId,
+            staleVersionRequest.OutboxEventId,
+            0,
+            "Changed canonical source version persisted a fact.");
+
+        JournalPreparationRequest closedPeriodRequest = CreateJournalPreparationRequest(
+            tenantId, companyId, actorId, 44m, hasPostingPermission: true);
+        await SetGeneralLedgerPeriodStageAsync(
+            migratorDataSource, tenantId, companyId, actorId, closeStage: 1);
+        try
+        {
+            await using NpgsqlConnection connection = await appDataSource.OpenConnectionAsync();
+            await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            PeriodInvariantException exception = await ThrowsAsync<PeriodInvariantException>(() =>
+                PostgresJournalPreparationOrchestrator.PrepareAsync(
+                    connection,
+                    transaction,
+                    closedPeriodRequest,
+                    AppendJournalPreparationAuditAsync,
+                    AppendJournalPreparationOutboxAsync).AsTask());
+            Assert(exception.Code == "PERIOD_GL_LOCK_BLOCKS_POSTING",
+                "Closed-period journal preparation returned an unexpected error code.");
+            await transaction.RollbackAsync();
+        }
+        finally
+        {
+            await SetGeneralLedgerPeriodStageAsync(
+                migratorDataSource, tenantId, companyId, actorId, closeStage: 0);
+        }
+
+        await AssertAtomicJournalFactCountsAsync(
+            migratorDataSource,
+            closedPeriodRequest.ReservationId,
+            closedPeriodRequest.JournalDraftId,
+            closedPeriodRequest.AuditEventId,
+            closedPeriodRequest.OutboxEventId,
+            0,
+            "Closed-period journal preparation persisted a fact.");
+    }
+
+    private static async Task SetGeneralLedgerPeriodStageAsync(
+        NpgsqlDataSource dataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid actorId,
+        short closeStage)
+    {
+        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await ExecuteAsync(connection, transaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+        await using var command = new NpgsqlCommand(
+            "UPDATE accounting.period_lock_state SET close_stage = $4, version = version + 1, updated_at = now(), updated_by = $3 WHERE tenant_id = $1 AND company_id = $2 AND lock_scope = 2",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue(tenantId);
+        command.Parameters.AddWithValue(companyId);
+        command.Parameters.AddWithValue(actorId);
+        command.Parameters.AddWithValue(closeStage);
+        Assert(await command.ExecuteNonQueryAsync() == 1,
+            "Journal preparation test could not change the authoritative GL period stage.");
+        await transaction.CommitAsync();
+    }
+
+    private static JournalPreparationRequest CreateJournalPreparationRequest(
+        Guid tenantId,
+        Guid companyId,
+        Guid actorId,
+        decimal amount,
+        bool hasPostingPermission)
+    {
+        Guid postingRuleVersionId = Guid.CreateVersion7();
+        Guid chartVersionId = Guid.CreateVersion7();
+        Guid debitAccountId = Guid.CreateVersion7();
+        Guid creditAccountId = Guid.CreateVersion7();
+        Guid dimensionId = Guid.CreateVersion7();
+        CurrencyCode gbp = CurrencyCode.Create("GBP");
+        ExchangeRateSnapshot rate = ExchangeRateSnapshot.Create(
+            tenantId, companyId, Guid.CreateVersion7(), 1, gbp, gbp, "spot", "integration", new DateOnly(2026, 8, 24), 1m, 1m);
+        RoundingPolicySnapshot rounding = RoundingPolicySnapshot.Create(
+            tenantId, companyId, Guid.CreateVersion7(), 1, 4, RoundingMode.ToEven);
+        JournalCurrencyAmountSnapshot debitCurrency = JournalCurrencyAmountSnapshot.Create(
+            rate, rounding, JournalAmount.Create(amount, 0m));
+        JournalCurrencyAmountSnapshot creditCurrency = JournalCurrencyAmountSnapshot.Create(
+            rate, rounding, JournalAmount.Create(0m, amount));
+        ValidatedJournalDraft draft = ValidatedJournalDraft.Create(
+            tenantId,
+            companyId,
+            Guid.CreateVersion7(),
+            postingRuleVersionId,
+            "integration.invoice",
+            "journal-preparation",
+            new DateOnly(2026, 8, 24),
+            new DateTimeOffset(2026, 8, 24, 12, 0, 0, TimeSpan.Zero),
+            gbp,
+            [
+                JournalLineDraft.Create(debitAccountId, null, debitCurrency.FunctionalAmount,
+                    [DimensionAssignment.Create(dimensionId, Guid.CreateVersion7())], debitCurrency),
+                JournalLineDraft.Create(creditAccountId, null, creditCurrency.FunctionalAmount,
+                    [DimensionAssignment.Create(dimensionId, Guid.CreateVersion7())], creditCurrency),
+            ]);
+        string[] permissions = hasPostingPermission ? [AuthorizedJournalPostingCandidate.RequiredPermission] : [];
+        var scope = new ExecutionScope(tenantId, actorId, [new CompanyAccess(companyId, permissions)]);
+        var auditContext = new RequestAuditContext(
+            Guid.CreateVersion7(), "journal-preparation-integration-trace", tenantId, actorId,
+            new HashSet<Guid> { companyId }, "synthetic-integration-session");
+        return new JournalPreparationRequest(
+            scope, auditContext, draft, chartVersionId,
+            Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7());
+    }
+
+    private static async Task SeedJournalPreparationEvidenceAsync(
+        NpgsqlDataSource dataSource,
+        JournalPreparationRequest request,
+        Guid actorId)
+    {
+        await SeedAccountPostingEvidenceAsync(
+            dataSource,
+            request.Draft.TenantId,
+            request.Draft.CompanyId,
+            actorId,
+            request.ChartOfAccountsVersionId,
+            request.Draft.Lines.Select(line => (line.AccountId, AccountKind.Posting, true)));
+        Guid[] dimensionIds = request.Draft.Lines
+            .SelectMany(line => line.Dimensions)
+            .Select(assignment => assignment.DimensionId)
+            .Distinct()
+            .ToArray();
+        await SeedDimensionRequirementAsync(
+            dataSource,
+            request.Draft.TenantId,
+            request.Draft.CompanyId,
+            actorId,
+            request.Draft.PostingRuleVersionId,
+            dimensionIds);
+        await SeedCurrencyEvidenceAsync(dataSource, request, actorId, numeratorOverride: null);
+    }
+
+    private static JournalPreparationCommand ToJournalPreparationCommand(JournalPreparationRequest request) =>
+        new(
+            request.Scope,
+            request.AuditContext,
+            request.Draft.PostingIdentity,
+            1,
+            request.ReservationId,
+            request.JournalDraftId,
+            request.AuditEventId,
+            request.OutboxEventId);
+
+    private static ValueTask AppendJournalPreparationAuditAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        JournalPreparationRequest request,
+        Guid persistedJournalDraftId,
+        CancellationToken cancellationToken) =>
+        PostgresAuthorizationAuditWriter.AppendAsync(
+            connection,
+            transaction,
+            request.AuditContext,
+            request.AuditEventId,
+            new AuthorizationAuditEvent(
+                "accounting.journal-draft.prepare",
+                "validated-journal-draft",
+                persistedJournalDraftId.ToString("D"),
+                "allowed",
+                "JOURNAL_DRAFT_PREPARED"),
+            cancellationToken);
+
+    private static ValueTask<bool> AppendJournalPreparationOutboxAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        JournalPreparationRequest request,
+        Guid persistedJournalDraftId,
+        Guid reservationId,
+        Guid periodId,
+        CancellationToken cancellationToken) =>
+        PostgresOutboxWriter.EnqueueAsync(
+            connection,
+            transaction,
+            request.Scope,
+            new OutboxMessage(
+                request.OutboxEventId,
+                request.Draft.TenantId,
+                request.Draft.CompanyId,
+                "validated-journal-draft",
+                persistedJournalDraftId,
+                1,
+                "accounting.journal-draft-prepared.v1",
+                1,
+                request.Draft.RecordedAt,
+                $"{{\"journalDraftId\":\"{persistedJournalDraftId:D}\",\"reservationId\":\"{reservationId:D}\",\"periodId\":\"{periodId:D}\"}}"),
+            cancellationToken);
+
+    private static async Task InsertAccountingPeriodAsync(
+        NpgsqlDataSource dataSource,
+        Guid periodId,
+        Guid tenantId,
+        Guid companyId,
+        string code,
+        DateOnly startsOn,
+        DateOnly endsOn,
+        Guid actorId)
+    {
+        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await ExecuteAsync(connection, transaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+        await using (var periodCommand = new NpgsqlCommand(
+            """
+            INSERT INTO accounting.accounting_period
+                (period_id, tenant_id, company_id, period_code, starts_on, ends_on, created_by, updated_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+            """,
+            connection,
+            transaction))
+        {
+            periodCommand.Parameters.AddWithValue(periodId);
+            periodCommand.Parameters.AddWithValue(tenantId);
+            periodCommand.Parameters.AddWithValue(companyId);
+            periodCommand.Parameters.AddWithValue(code);
+            periodCommand.Parameters.AddWithValue(startsOn);
+            periodCommand.Parameters.AddWithValue(endsOn);
+            periodCommand.Parameters.AddWithValue(actorId);
+            await periodCommand.ExecuteNonQueryAsync();
+        }
+
+        const string lockSql = """
+            INSERT INTO accounting.period_lock_state
+                (tenant_id, company_id, period_id, lock_scope, close_stage, updated_by)
+            VALUES ($1, $2, $3, 2, 0, $4), ($1, $2, $3, 4, 0, $4)
+            """;
+        await using (var lockCommand = new NpgsqlCommand(lockSql, connection, transaction))
+        {
+            lockCommand.Parameters.AddWithValue(tenantId);
+            lockCommand.Parameters.AddWithValue(companyId);
+            lockCommand.Parameters.AddWithValue(periodId);
+            lockCommand.Parameters.AddWithValue(actorId);
+            await lockCommand.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
+    }
+
+    private static async Task AssertJournalReservationAuditOutboxAtomicityAsync(
+        NpgsqlDataSource migratorDataSource,
+        NpgsqlDataSource appDataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid actorId)
+    {
+        var scope = new ExecutionScope(tenantId, actorId, [companyId]);
+        var auditContext = new RequestAuditContext(
+            Guid.CreateVersion7(),
+            "journal-atomicity-integration-trace",
+            tenantId,
+            actorId,
+            new HashSet<Guid> { companyId },
+            "synthetic-integration-session");
+        Guid reservationId = Guid.CreateVersion7();
+        Guid journalDraftId = Guid.CreateVersion7();
+        Guid auditEventId = Guid.CreateVersion7();
+        Guid outboxEventId = Guid.CreateVersion7();
+        ValidatedJournalDraft draft = CreateIntegrationJournalDraft(
+            tenantId,
+            companyId,
+            Guid.CreateVersion7(),
+            Guid.CreateVersion7(),
+            Guid.CreateVersion7(),
+            Guid.CreateVersion7(),
+            amount: 40m,
+            reverseLineOrder: false);
+
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            JournalSourceReservationResult reservation = await PostgresJournalSourceReservationWriter.ReserveAsync(
+                connection,
+                transaction,
+                scope,
+                reservationId,
+                draft);
+            Assert(reservation.Created, "Atomicity probe did not create its journal-source reservation.");
+            ValidatedJournalDraftPersistenceResult persistedDraft =
+                await PostgresValidatedJournalDraftWriter.PersistAsync(
+                    connection,
+                    transaction,
+                    scope,
+                    journalDraftId,
+                    reservation,
+                    draft);
+            Assert(persistedDraft.Created, "Atomicity probe did not persist its validated journal draft.");
+
+            ValidatedJournalDraftPersistenceResult retriedDraft =
+                await PostgresValidatedJournalDraftWriter.PersistAsync(
+                    connection,
+                    transaction,
+                    scope,
+                    Guid.CreateVersion7(),
+                    reservation,
+                    draft);
+            Assert(!retriedDraft.Created && retriedDraft.JournalDraftId == journalDraftId,
+                "Validated journal draft retry was not idempotent.");
+
+            await PostgresAuthorizationAuditWriter.AppendAsync(
+                connection,
+                transaction,
+                auditContext,
+                auditEventId,
+                new AuthorizationAuditEvent(
+                    "accounting.journal-draft.reserve",
+                    "journal-source-reservation",
+                    reservationId.ToString("D"),
+                    "allowed",
+                    "JOURNAL_SOURCE_RESERVED"));
+            Assert(await PostgresOutboxWriter.EnqueueAsync(
+                    connection,
+                    transaction,
+                    scope,
+                    new OutboxMessage(
+                        outboxEventId,
+                        tenantId,
+                        companyId,
+                        "journal-source-reservation",
+                        reservationId,
+                        1,
+                        "accounting.journal-draft-reserved.v1",
+                        1,
+                        draft.RecordedAt,
+                        $"{{\"reservationId\":\"{reservationId:D}\"}}")),
+                "Atomicity probe did not enqueue its outbox event.");
+            await transaction.CommitAsync();
+        }
+
+        await AssertAtomicJournalFactCountsAsync(
+            migratorDataSource,
+            reservationId,
+            journalDraftId,
+            auditEventId,
+            outboxEventId,
+            expectedCount: 1,
+            "Committed journal reservation/draft/audit/outbox facts were not all persisted exactly once.");
+
+        await AssertValidatedJournalDraftRuntimeImmutabilityAsync(
+            appDataSource,
+            tenantId,
+            companyId,
+            actorId,
+            journalDraftId);
+
+        Guid rolledBackReservationId = Guid.CreateVersion7();
+        Guid rolledBackJournalDraftId = Guid.CreateVersion7();
+        Guid rolledBackAuditEventId = Guid.CreateVersion7();
+        Guid rolledBackOutboxEventId = Guid.CreateVersion7();
+        ValidatedJournalDraft rolledBackDraft = CreateIntegrationJournalDraft(
+            tenantId,
+            companyId,
+            Guid.CreateVersion7(),
+            Guid.CreateVersion7(),
+            Guid.CreateVersion7(),
+            Guid.CreateVersion7(),
+            amount: 41m,
+            reverseLineOrder: false);
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            JournalSourceReservationResult rolledBackReservation = await PostgresJournalSourceReservationWriter.ReserveAsync(
+                connection,
+                transaction,
+                scope,
+                rolledBackReservationId,
+                rolledBackDraft);
+            await PostgresValidatedJournalDraftWriter.PersistAsync(
+                connection,
+                transaction,
+                scope,
+                rolledBackJournalDraftId,
+                rolledBackReservation,
+                rolledBackDraft);
+            await PostgresAuthorizationAuditWriter.AppendAsync(
+                connection,
+                transaction,
+                auditContext with { CorrelationId = Guid.CreateVersion7() },
+                rolledBackAuditEventId,
+                new AuthorizationAuditEvent(
+                    "accounting.journal-draft.reserve",
+                    "journal-source-reservation",
+                    rolledBackReservationId.ToString("D"),
+                    "allowed",
+                    "JOURNAL_SOURCE_RESERVED"));
+            await PostgresOutboxWriter.EnqueueAsync(
+                connection,
+                transaction,
+                scope,
+                new OutboxMessage(
+                    rolledBackOutboxEventId,
+                    tenantId,
+                    companyId,
+                    "journal-source-reservation",
+                    rolledBackReservationId,
+                    1,
+                    "accounting.journal-draft-reserved.v1",
+                    1,
+                    rolledBackDraft.RecordedAt,
+                    $"{{\"reservationId\":\"{rolledBackReservationId:D}\"}}"));
+            await transaction.RollbackAsync();
+        }
+
+        await AssertAtomicJournalFactCountsAsync(
+            migratorDataSource,
+            rolledBackReservationId,
+            rolledBackJournalDraftId,
+            rolledBackAuditEventId,
+            rolledBackOutboxEventId,
+            expectedCount: 0,
+            "Rolled-back journal reservation/draft/audit/outbox transaction persisted a partial fact.");
+    }
+
+    private static async Task AssertValidatedJournalDraftRuntimeImmutabilityAsync(
+        NpgsqlDataSource dataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid actorId,
+        Guid journalDraftId)
+    {
+        await using (NpgsqlConnection privilegeConnection = await dataSource.OpenConnectionAsync())
+        await using (var privilegeCommand = new NpgsqlCommand(
+            """
+            SELECT
+                has_table_privilege(current_user, 'accounting.validated_journal_draft', 'SELECT'),
+                has_table_privilege(current_user, 'accounting.validated_journal_draft', 'INSERT'),
+                has_table_privilege(current_user, 'accounting.validated_journal_draft', 'UPDATE'),
+                has_table_privilege(current_user, 'accounting.validated_journal_draft', 'DELETE'),
+                has_table_privilege(current_user, 'accounting.validated_journal_line', 'SELECT'),
+                has_table_privilege(current_user, 'accounting.validated_journal_line', 'INSERT'),
+                has_table_privilege(current_user, 'accounting.validated_journal_line', 'UPDATE'),
+                has_table_privilege(current_user, 'accounting.validated_journal_line', 'DELETE')
+            """,
+            privilegeConnection))
+        await using (NpgsqlDataReader reader = await privilegeCommand.ExecuteReaderAsync())
+        {
+            Assert(await reader.ReadAsync(), "Validated journal privilege metadata was not returned.");
+            Assert(reader.GetBoolean(0) && reader.GetBoolean(1) && reader.GetBoolean(4) && reader.GetBoolean(5),
+                "Runtime role cannot read and append validated journal snapshots.");
+            Assert(!reader.GetBoolean(2) && !reader.GetBoolean(3) && !reader.GetBoolean(6) && !reader.GetBoolean(7),
+                "Runtime role can mutate or delete validated journal snapshots.");
+        }
+
+        await AssertJournalSourceMutationRejectedAsync(
+            dataSource,
+            tenantId,
+            companyId,
+            actorId,
+            "UPDATE accounting.validated_journal_draft SET total_debit = total_debit WHERE journal_draft_id = $1",
+            journalDraftId,
+            "Runtime role updated an append-only validated journal draft.");
+        await AssertJournalSourceMutationRejectedAsync(
+            dataSource,
+            tenantId,
+            companyId,
+            actorId,
+            "DELETE FROM accounting.validated_journal_line WHERE journal_draft_id = $1",
+            journalDraftId,
+            "Runtime role deleted an append-only validated journal line.");
+
+        await using NpgsqlConnection scopedConnection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction scopedTransaction = await scopedConnection.BeginTransactionAsync();
+        await SetAuditScopeAsync(scopedConnection, scopedTransaction, tenantId, actorId, Guid.CreateVersion7());
+        Assert(await CountAsync(
+                scopedConnection,
+                scopedTransaction,
+                "SELECT count(*) FROM accounting.validated_journal_draft WHERE journal_draft_id = $1",
+                journalDraftId) == 0,
+            "Validated journal draft leaked outside the active company scope.");
+        Assert(await CountAsync(
+                scopedConnection,
+                scopedTransaction,
+                "SELECT count(*) FROM accounting.validated_journal_line WHERE journal_draft_id = $1",
+                journalDraftId) == 0,
+            "Validated journal lines leaked outside the active company scope.");
+        await scopedTransaction.CommitAsync();
+    }
+
+    private static async Task AssertAtomicJournalFactCountsAsync(
+        NpgsqlDataSource dataSource,
+        Guid reservationId,
+        Guid journalDraftId,
+        Guid auditEventId,
+        Guid outboxEventId,
+        long expectedCount,
+        string failureMessage,
+        decimal expectedAmount = 40m)
+    {
+        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await ExecuteAsync(connection, transaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+        long reservationCount = await CountAsync(
+            connection,
+            transaction,
+            "SELECT count(*) FROM accounting.journal_source_reservation WHERE reservation_id = $1",
+            reservationId);
+        long draftCount = await CountAsync(
+            connection,
+            transaction,
+            "SELECT count(*) FROM accounting.validated_journal_draft WHERE journal_draft_id = $1",
+            journalDraftId);
+        long lineCount = await CountAsync(
+            connection,
+            transaction,
+            "SELECT count(*) FROM accounting.validated_journal_line WHERE journal_draft_id = $1",
+            journalDraftId);
+        long auditCount = await CountAsync(
+            connection,
+            transaction,
+            "SELECT count(*) FROM platform.audit_event WHERE id = $1",
+            auditEventId);
+        long outboxCount = await CountAsync(
+            connection,
+            transaction,
+            "SELECT count(*) FROM platform.outbox_message WHERE event_id = $1",
+            outboxEventId);
+        if (expectedCount == 1)
+        {
+            await using (var headerCommand = new NpgsqlCommand(
+                """
+                SELECT total_debit = $2::numeric
+                   AND total_credit = $2::numeric
+                   AND line_count = 2
+                   AND functional_currency = 'GBP'
+                FROM accounting.validated_journal_draft
+                WHERE journal_draft_id = $1
+                """,
+                connection,
+                transaction))
+            {
+                headerCommand.Parameters.AddWithValue(journalDraftId);
+                headerCommand.Parameters.AddWithValue(expectedAmount);
+                Assert(await headerCommand.ExecuteScalarAsync() is true,
+                    "Validated journal header did not preserve its exact decimal totals and currency.");
+            }
+
+            await using var lineCommand = new NpgsqlCommand(
+                """
+                SELECT count(*) = 2
+                   AND sum(debit) = $2::numeric
+                   AND sum(credit) = $2::numeric
+                   AND min(line_number) = 1
+                   AND max(line_number) = 2
+                FROM accounting.validated_journal_line
+                WHERE journal_draft_id = $1
+                """,
+                connection,
+                transaction);
+            lineCommand.Parameters.AddWithValue(journalDraftId);
+            lineCommand.Parameters.AddWithValue(expectedAmount);
+            Assert(await lineCommand.ExecuteScalarAsync() is true,
+                "Validated journal lines did not preserve exact amounts and ordering.");
+        }
+        Assert(
+            reservationCount == expectedCount &&
+                draftCount == expectedCount &&
+                lineCount == expectedCount * 2 &&
+                auditCount == expectedCount &&
+                outboxCount == expectedCount,
+            failureMessage);
+        await transaction.CommitAsync();
+    }
+
     private static async Task AssertDatabaseReadinessAsync(NpgsqlDataSource dataSource)
     {
         var probe = new PostgresReadinessProbe(dataSource);
@@ -724,6 +2791,126 @@ internal static class DatabaseIntegrationCheck
         await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
         await ExecuteAsync(connection, transaction, "SET LOCAL ROLE kagu_erp_schema_owner");
 
+        await using (var rateCommand = new NpgsqlCommand(
+            "DELETE FROM accounting.exchange_rate_snapshot WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            rateCommand.Parameters.AddWithValue(tenantA);
+            rateCommand.Parameters.AddWithValue(tenantB);
+            await rateCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var roundingCommand = new NpgsqlCommand(
+            "DELETE FROM accounting.rounding_policy_snapshot WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            roundingCommand.Parameters.AddWithValue(tenantA);
+            roundingCommand.Parameters.AddWithValue(tenantB);
+            await roundingCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var dimensionLineCommand = new NpgsqlCommand(
+            "DELETE FROM accounting.posting_dimension_requirement WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            dimensionLineCommand.Parameters.AddWithValue(tenantA);
+            dimensionLineCommand.Parameters.AddWithValue(tenantB);
+            await dimensionLineCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var dimensionSetCommand = new NpgsqlCommand(
+            "DELETE FROM accounting.posting_dimension_requirement_set WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            dimensionSetCommand.Parameters.AddWithValue(tenantA);
+            dimensionSetCommand.Parameters.AddWithValue(tenantB);
+            await dimensionSetCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var accountSnapshotCommand = new NpgsqlCommand(
+            "DELETE FROM accounting.account_posting_snapshot WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            accountSnapshotCommand.Parameters.AddWithValue(tenantA);
+            accountSnapshotCommand.Parameters.AddWithValue(tenantB);
+            await accountSnapshotCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var chartVersionCommand = new NpgsqlCommand(
+            "DELETE FROM accounting.chart_of_accounts_version WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            chartVersionCommand.Parameters.AddWithValue(tenantA);
+            chartVersionCommand.Parameters.AddWithValue(tenantB);
+            await chartVersionCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var idempotencyCommand = new NpgsqlCommand(
+            "DELETE FROM platform.idempotency_record WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            idempotencyCommand.Parameters.AddWithValue(tenantA);
+            idempotencyCommand.Parameters.AddWithValue(tenantB);
+            await idempotencyCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var periodLockCommand = new NpgsqlCommand(
+            "DELETE FROM accounting.period_lock_state WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            periodLockCommand.Parameters.AddWithValue(tenantA);
+            periodLockCommand.Parameters.AddWithValue(tenantB);
+            await periodLockCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var periodCommand = new NpgsqlCommand(
+            "DELETE FROM accounting.accounting_period WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            periodCommand.Parameters.AddWithValue(tenantA);
+            periodCommand.Parameters.AddWithValue(tenantB);
+            await periodCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var lineCommand = new NpgsqlCommand(
+            "DELETE FROM accounting.validated_journal_line WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            lineCommand.Parameters.AddWithValue(tenantA);
+            lineCommand.Parameters.AddWithValue(tenantB);
+            await lineCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var draftCommand = new NpgsqlCommand(
+            "DELETE FROM accounting.validated_journal_draft WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            draftCommand.Parameters.AddWithValue(tenantA);
+            draftCommand.Parameters.AddWithValue(tenantB);
+            await draftCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var reservationCommand = new NpgsqlCommand(
+            "DELETE FROM accounting.journal_source_reservation WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            reservationCommand.Parameters.AddWithValue(tenantA);
+            reservationCommand.Parameters.AddWithValue(tenantB);
+            await reservationCommand.ExecuteNonQueryAsync();
+        }
+
         await using (var outboxCommand = new NpgsqlCommand(
             "DELETE FROM platform.outbox_message WHERE tenant_id = $1 OR tenant_id = $2",
             connection,
@@ -796,5 +2983,20 @@ internal static class DatabaseIntegrationCheck
         {
             throw new InvalidOperationException(message);
         }
+    }
+
+    private static async Task<TException> ThrowsAsync<TException>(Func<Task> action)
+        where TException : Exception
+    {
+        try
+        {
+            await action();
+        }
+        catch (TException exception)
+        {
+            return exception;
+        }
+
+        throw new InvalidOperationException($"Expected {typeof(TException).Name} was not thrown.");
     }
 }

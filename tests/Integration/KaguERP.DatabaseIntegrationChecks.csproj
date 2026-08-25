@@ -7,7 +7,23 @@
     <PackageReference Include="Npgsql" />
   </ItemGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\src\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
-    <ProjectReference Include="..\..\src\Erp.Bootstrap\KaguERP.Bootstrap.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\..\src\Erp.Bootstrap\*.cs"
+             Exclude="..\..\src\Erp.Bootstrap\bin\**;..\..\src\Erp.Bootstrap\obj\**"
+             LinkBase="Bootstrap" />
+    <Compile Include="..\..\src\Modules\Accounting\Accounting.Domain\**\*.cs"
+             Exclude="..\..\src\Modules\Accounting\Accounting.Domain\bin\**;..\..\src\Modules\Accounting\Accounting.Domain\obj\**"
+             LinkBase="Accounting.Domain" />
+    <Compile Include="..\..\src\Modules\Accounting\Accounting.Application\**\*.cs"
+             Exclude="..\..\src\Modules\Accounting\Accounting.Application\bin\**;..\..\src\Modules\Accounting\Accounting.Application\obj\**"
+             LinkBase="Accounting.Application" />
+    <Compile Include="..\..\src\Modules\Accounting\Accounting.Infrastructure\**\*.cs"
+             Exclude="..\..\src\Modules\Accounting\Accounting.Infrastructure\bin\**;..\..\src\Modules\Accounting\Accounting.Infrastructure\obj\**"
+             LinkBase="Accounting.Infrastructure" />
   </ItemGroup>
 </Project>

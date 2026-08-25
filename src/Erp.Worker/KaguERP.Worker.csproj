@@ -6,7 +6,12 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Erp.Bootstrap\KaguERP.Bootstrap.csproj" />
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Erp.Bootstrap\*.cs" LinkBase="Bootstrap" />
   </ItemGroup>
 </Project>
-

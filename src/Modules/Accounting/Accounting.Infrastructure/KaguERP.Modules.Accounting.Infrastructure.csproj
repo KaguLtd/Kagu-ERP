@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Accounting.Domain\KaguERP.Modules.Accounting.Domain.csproj" />
+    <ProjectReference Include="..\Accounting.Application\KaguERP.Modules.Accounting.Application.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
+  </ItemGroup>
+</Project>

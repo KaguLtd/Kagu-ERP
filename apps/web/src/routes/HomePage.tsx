@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 
 import { fetchHealth } from "../api/health";
 import { ContextBar } from "../components/erp/ContextBar";
@@ -41,9 +42,11 @@ export function HomePage() {
             />
             <span>{apiStatus}</span>
           </div>
+          <Link className="secondary-link" to="/reports/party-account">
+            Cari rapor çalışma alanını aç
+          </Link>
         </section>
       </main>
     </div>
   );
 }
-

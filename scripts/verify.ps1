@@ -55,6 +55,7 @@ if (Enable-DockerCommand) {
 
     if ($runningServices -contains 'erp-db') {
         & ./scripts/test-db.ps1
+        & ./scripts/test-migration-empty.ps1
     } else {
         Write-Warning 'Database integration checks skipped: the Kagu ERP erp-db Compose service is not running.'
     }

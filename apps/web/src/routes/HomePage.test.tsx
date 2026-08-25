@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HomePage } from "./HomePage";
@@ -12,9 +13,11 @@ function renderHomePage() {
   });
 
   return render(
-    <QueryClientProvider client={queryClient}>
-      <HomePage />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <HomePage />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -49,4 +52,3 @@ describe("HomePage", () => {
     expect(await screen.findByText("API erişilemiyor")).toBeVisible();
   });
 });
-

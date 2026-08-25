@@ -142,6 +142,8 @@ GET /api/v1/invoices?status=posted&partyId=...&legalDateFrom=...&cursor=...&limi
 - Finansal command retention'ı normal API cache'den daha uzun; politika modülde tanımlanır.
 - Eşzamanlı aynı key'de tek işlem kazanır, diğeri bekler veya deterministik çatışma alır.
 
+PostgreSQL `platform.idempotency_record` uygulaması tenant, company, actor, command ve key birleşimini unique tutar. Aynı payload için completed HTTP status/body ve aggregate kimliği canonical JSON olarak replay edilir; farklı request hash stabil `IDEMPOTENCY_KEY_REUSED` çatışmasıdır. Runtime rolü kimlik/request alanlarını güncelleyemez ve yalnız `in-progress → completed` geçişinin kolonlarına sahiptir; trigger ikinci veya geri yönlü geçişi engeller. Kayıt silme/retention runtime API yetkisi değildir.
+
 ## 11. Büyük işler
 
 - Import, export, rapor, e-Fatura batch ve maliyet yeniden hesaplama asenkron `job` olur.

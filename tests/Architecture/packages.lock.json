@@ -72,15 +72,9 @@
       "kaguerp.api": {
         "type": "Project",
         "dependencies": {
-          "KaguERP.Bootstrap": "[1.0.0, )",
-          "KaguERP.BuildingBlocks.Contracts": "[1.0.0, )",
-          "Microsoft.AspNetCore.Authentication.JwtBearer": "[10.0.11, )"
-        }
-      },
-      "kaguerp.bootstrap": {
-        "type": "Project",
-        "dependencies": {
           "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.BuildingBlocks.Contracts": "[1.0.0, )",
+          "Microsoft.AspNetCore.Authentication.JwtBearer": "[10.0.11, )",
           "Npgsql": "[10.0.3, )"
         }
       },

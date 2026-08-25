@@ -82,6 +82,8 @@ Web: toplu seçim yalnız aynı karar/kural bağlamındaki düşük riskli göre
 
 ApprovalStep yalnız approver count değil distinct-person quorum taşır. Aynı kullanıcı, vekâlet, paylaşılan hesap veya aynı service identity birden çok gerekli oyu dolduramaz. Maker, kaynak kaydı son değiştiren, lehtar banka hesabını değiştiren ve repost/reopen isteyen kişiler policy’ye göre approver olamaz.
 
+Tamamlanmış onay kanıtı tenant, company, approval instance, workflow version ve kaynak subject type/id/version birleşimine immutable bağlanır. Karar kimlikleri ve approver kimlikleri tekildir; maker karar kümesinde bulunamaz ve distinct karar sayısı policy'nin verdiği required quorum'u karşılamalıdır. Bu kanıt quorum veya uygun onaycı politikasını kendi başına belirlemez; yalnız authoritative, sürümlü policy sonucunun posting gibi kritik consumer'lar tarafından fail-closed doğrulanabileceği parametrik sözleşmedir.
+
 Delegation:
 
 - başlangıç/bitiş, kapsam, reason ve delegator/delegatee taşır;

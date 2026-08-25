@@ -84,8 +84,14 @@ if ([string]::IsNullOrWhiteSpace($smokePassword)) {
 
 $authority = 'http://localhost:58080/realms/kagu-local-test'
 $tokenEndpoint = 'http://127.0.0.1:58080/realms/kagu-local-test/protocol/openid-connect/token'
-$apiBaseUrl = 'http://127.0.0.1:55099'
+$portProbe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+$portProbe.Start()
+$apiPort = ([System.Net.IPEndPoint]$portProbe.LocalEndpoint).Port
+$portProbe.Stop()
+$apiBaseUrl = "http://127.0.0.1:$apiPort"
 $apiProcess = $null
+$apiStandardOutputPath = $null
+$apiStandardErrorPath = $null
 $fixtureSeeded = $false
 $previousEnvironment = @{
     ASPNETCORE_URLS = [Environment]::GetEnvironmentVariable('ASPNETCORE_URLS')
@@ -140,23 +146,32 @@ try {
     }
     $fixtureSeeded = $true
 
-    $occupiedPort = Get-NetTCPConnection -LocalPort 55099 -State Listen -ErrorAction SilentlyContinue
+    $occupiedPort = Get-NetTCPConnection -LocalPort $apiPort -State Listen -ErrorAction SilentlyContinue
     if ($null -ne $occupiedPort) {
-        throw 'Local auth smoke port 55099 is already in use.'
+        throw "Local auth smoke port $apiPort became occupied before API startup."
     }
 
     $env:ASPNETCORE_URLS = $apiBaseUrl
     $env:Authentication__Authority = $authority
     $env:Authentication__Audience = 'kagu-erp-api'
     $env:Authentication__RequireHttpsMetadata = 'false'
+    $apiStandardOutputPath = Join-Path ([System.IO.Path]::GetTempPath()) 'kagu-erp-auth-smoke-api.stdout.log'
+    $apiStandardErrorPath = Join-Path ([System.IO.Path]::GetTempPath()) 'kagu-erp-auth-smoke-api.stderr.log'
     $apiProcess = Start-Process -FilePath 'dotnet' `
         -ArgumentList @('src/Erp.Api/bin/Release/net10.0/KaguERP.Api.dll') `
+        -RedirectStandardOutput $apiStandardOutputPath `
+        -RedirectStandardError $apiStandardErrorPath `
         -PassThru -WindowStyle Hidden
 
     $healthy = $false
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         if ($apiProcess.HasExited) {
-            throw "Local API exited during auth smoke startup with code $($apiProcess.ExitCode)."
+            $startupError = if (Test-Path -LiteralPath $apiStandardErrorPath) {
+                (Get-Content -LiteralPath $apiStandardErrorPath -Raw).Trim()
+            } else {
+                ''
+            }
+            throw "Local API exited during auth smoke startup with code $($apiProcess.ExitCode). $startupError"
         }
 
         try {
@@ -203,6 +218,13 @@ try {
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Authentication smoke fixture cleanup failed with exit code $LASTEXITCODE."
         }
+    }
+
+    if ($null -ne $apiStandardOutputPath) {
+        Remove-Item -LiteralPath $apiStandardOutputPath -Force -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $apiStandardErrorPath) {
+        Remove-Item -LiteralPath $apiStandardErrorPath -Force -ErrorAction SilentlyContinue
     }
 
     foreach ($entry in $previousEnvironment.GetEnumerator()) {

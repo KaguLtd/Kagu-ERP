@@ -64,6 +64,10 @@ CSV/XLSX çıktısında formül enjeksiyonu önlenir; hücreler güvenli kaçar.
 - `RPT-INV-004`: Yetkisiz sütun dışa aktarmada da görünmez.
 - `RPT-INV-005`: Yenileme başarısızsa eski veri “güncel” etiketiyle gösterilmez.
 - `RPT-INV-006`: Rapor tanımı değişikliği sürüm ve regresyon testi ister.
+- `RPT-CTRL-001`: Alt defter ve GL kontrol hesabı snapshot'ları yalnız aynı tenant, company, currency, effective-date as-of, veri kesimi, projection generation ve boyut kesiminde karşılaştırılabilir.
+- `RPT-CTRL-002`: Her kontrol snapshot'ında `opening + debits - credits = closing` olmalı; mutabakat farkı `subledger closing - GL closing` olarak exact decimal hesaplanır ve sessiz tolerans uygulanmaz.
+- `RPT-PARTY-001`: Cari ekstre satırları aynı tenant/company/party account/control account/currency kesiminde effective as-of ve recorded-at veri kesimiyle deterministik sıralanır; kapanış bakiyesi immutable olay etkilerinden türetilir.
+- `RPT-PARTY-002`: Aging yalnız aynı rapor kesimindeki açık vade kalemlerini sürümlü ve açık bucket policy snapshot'ıyla sınıflar; bucket toplamları, aging toplamı ve aynı kesimdeki cari ekstre kapanışı exact decimal cross-foot eder.
 
 ## 8. Performans ve test
 

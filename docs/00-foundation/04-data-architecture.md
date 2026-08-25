@@ -158,6 +158,7 @@ Posted tablolarda uygulama katmanı yasağına ek olarak:
 - Para ölçeğine göre borç/alacak non-negative; aynı satırda ikisi birden pozitif olamaz.
 - Entry posting öncesi toplam borç=alacak; DB deferred constraint trigger veya atomik stored validation ile korunur.
 - Aynı `source_type/source_id/posting_purpose` için tek aktif journal unique index.
+- Posting transaction'ından önce veya onun içinde kullanılan canonical kaynak rezervasyonu tenant + company + source type + source event + posting purpose kapsamında append-only ve unique olmalıdır. Rezervasyon tek başına posted journal veya mali sonuç değildir; journal ve outbox ile aynı transaction'a bağlanana kadar yalnız duplicate-yarış korumasıdır.
 - Kapalı dönem kontrolü posting command ve DB fonksiyonu içinde.
 - Manual journal kaynak türü, gerekçe, ek ve çift onay ister.
 

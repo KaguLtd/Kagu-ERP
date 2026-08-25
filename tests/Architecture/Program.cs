@@ -1,5 +1,11 @@
 using System.Xml.Linq;
 using KaguERP.DatabaseIntegrationChecks;
+using KaguERP.Migrator;
+
+if (args is ["migrate"])
+{
+    return await MigrationApplication.RunAsync([]);
+}
 
 if (args is ["database"])
 {
@@ -43,9 +49,17 @@ foreach (var project in projects.Values)
 
         if (!AllowedLayers.Value[project.Layer].Contains(referencedProject.Layer))
         {
-            failures.Add(
-                $"{project.RelativePath}: {project.Layer} katmanı " +
-                $"{referencedProject.Layer} katmanına başvuramaz ({referencedProject.RelativePath}).");
+            bool moduleApplicationToBuildingBlockApplication =
+                project.Layer == Layer.Application &&
+                project.ModuleName is not null &&
+                referencedProject.Layer == Layer.Application &&
+                referencedProject.ModuleName is null;
+            if (!moduleApplicationToBuildingBlockApplication)
+            {
+                failures.Add(
+                    $"{project.RelativePath}: {project.Layer} katmanı " +
+                    $"{referencedProject.Layer} katmanına başvuramaz ({referencedProject.RelativePath}).");
+            }
         }
 
         if (referencedProject.Layer == Layer.Infrastructure &&

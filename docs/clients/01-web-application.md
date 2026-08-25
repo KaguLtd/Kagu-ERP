@@ -183,3 +183,10 @@ Rapor ekranı as-of zamanı, data-through watermark, projection generation, curr
 Export öncesi row count, control totals, kapsam ve hassas veri uyarısı; sonrası file hash/audit reference sunulur. Karşılaştırmalı raporda null, sıfır ve veri henüz yüklenmedi durumları ayrıdır.
 
 Playwright akışları kısmi allocation, bankada bekleyen ödeme, posting exception retry, close checklist, backdate impact ve source-to-GL drill-down’ı kapsar.
+
+## 16. Rapor drill-down istemci sözleşmesi
+
+- `WEB-RPT-001`: Rapor sayfası company, party/report filter, as-of ve odak kimliğini URL/query key içinde taşır; drill-down aynı bağlamı kaybetmez.
+- `WEB-RPT-002`: Tutar görünürlüğü, forbidden sonucu ve allowed action'lar server yanıtından gelir; UI rol/permission tahmin etmez ve redacted tutarı istemci verisinden geri üretemez.
+- `WEB-RPT-003`: As-of, data-through, generated-at, projection generation, definition version ve stale durumu rapor yüzeyinde görünürdür; stale sayfalar sessizce güncel gibi gösterilmez.
+- `WEB-RPT-004`: Para DTO'su decimal string kalır; istemci finansal toplamı `number` ile yeniden hesaplamaz.
