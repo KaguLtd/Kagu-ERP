@@ -129,6 +129,10 @@ Fatura allocation durumu bu zincirden ayrıdır. Ödeme posted olabilir fakat he
 
 Transit/outstanding receipts ve outstanding payments GL hesapları company/bank/journal policy’sine bağlıdır. Reconciliation gerçekleşince transit hesap banka ana hesabına kapanır; tek payment iki kez bankaya yazılmaz.
 
+Payment economic-event persistence teknik kanıtı (26 Ağustos 2026): Same-currency domain-validated payment draft'ı canonical source/purpose uniqueness ve bütün identity-rate snapshot alanlarıyla [append-only PostgreSQL persistence spike'ında](../project/plans/2026-08-26-payment-economic-event-persistence-spike.md) kanıtlandı. İki connection yarışında tek event oluştu; changed identity conflict, cross-company RLS ve runtime UPDATE/DELETE reddi geçti. Bu teknik snapshot approval, posted banka/kasa hareketi, settlement, reconciliation veya allocation kullanılabilirliği değildir.
+
+Authoritative payment loader kanıtı (26 Ağustos 2026): Payment, canonical source ve identity-rate snapshot alanlarını aynı transaction/company scope içinde okuyup Treasury domain invariantlarından yeniden geçiren [salt-okunur loader](../project/plans/2026-08-26-authoritative-payment-economic-event-loader-spike.md) gerçek PostgreSQL'de doğrulandı. Cross-company payment ID fail-closed `null` döner; loader lifecycle state veya allocation kullanılabilirliği üretmez.
+
 ## 12. Ekstre bütünlüğü ve ISO 20022 hazırlığı
 
 Statement/StatementLine modeli CSV, MT940, OFX veya ISO 20022 camt.053 adaptörlerinden bağımsız kanoniktir. MVP’de format desteği banka örnek dosyasıyla onaylanır; ISO 20022 ismi kullanmak tüm bankaların aynı profil olduğu anlamına gelmez.
@@ -140,6 +144,8 @@ Her import şunları saklar:
 - opening/closing ve available balances;
 - line booking date, value date, amount/currency, bank reference, counterparty ve remittance;
 - parser version, control counts/totals ve duplicate decision.
+
+Normalized statement-line persistence kanıtı (26 Ağustos 2026): Canonical external identity, signed amount/currency, booking/value date, raw SHA-256 ve parser version snapshot'ı [append-only PostgreSQL spike'ında](../project/plans/2026-08-26-statement-line-persistence-spike.md) kalıcılaştırıldı. Aynı external identity retry ve iki-connection yarışında tek satır üretir; changed identity payload, cross-company okuma ve runtime UPDATE/DELETE reddedilir. External-key türetimi ve dosya/parser güvenliği bu teknik tablonun değil, sürümlü adapter/import pipeline'ın sorumluluğudur.
 
 Aynı dosya veya bank transaction tekrarında yeni hareket yaratılmaz. Raw payload mali domain tablosuna doğrudan yazılmaz; normalize mapping lineage taşır.
 

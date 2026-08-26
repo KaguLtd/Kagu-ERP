@@ -165,6 +165,8 @@ ayrı izler. Yaşlandırma belge tarihine değil açık policy’ye göre vade t
 - `PARTY-OI-001`: Open-item remaining amount mutable otorite değildir; original amount eksi as-of allocation ve write-off karşılıklarından türetilir.
 - `PARTY-OI-002`: Unallocation ve write-off reversal, asıl append-only olaya aynı kapsam/para/tutarla bağlanır; asıl olay değiştirilmez veya silinmez.
 
+Persistence uygulama kanıtı (26 Ağustos 2026): Minimal party identity kabuğu, company/currency scoped party account ve immutable due-schedule header/line modeli [teknik spike](../project/plans/2026-08-26-party-account-due-schedule-persistence-spike.md) kapsamında PostgreSQL'e eklendi. Deferred DB guard taksit sayısı ve toplamını kaynağa tam cross-foot eder; aynı source/version tekrarı yalnız bütün header ve taksit snapshot alanları eşleşirse ilk sonucu döndürür. [Authoritative loader](../project/plans/2026-08-26-authoritative-due-schedule-loader-spike.md) aynı transaction ve company scope içinde snapshot'ı domain invariantlarından yeniden geçirir; eksik/bozuk içerik fail-closed olur. Forced RLS, cross-company negatif test ve runtime UPDATE/DELETE reddi gerçek PostgreSQL'de geçti. Remaining balance, payment-term üretimi ve allocation bu persistence diliminin kapsamı değildir.
+
 ## 16. Payment allocation defteri
 
 Payment ekonomik nakit olayıdır; PaymentAllocation ödeme/kredi/mahsup ile DueScheduleLine arasındaki bağdır. Allocation:
@@ -177,6 +179,12 @@ Payment ekonomik nakit olayıdır; PaymentAllocation ödeme/kredi/mahsup ile Due
 - write-off, iskonto ve kur farkını ayrı reason/account/rule ile üretir.
 
 Settlement terimi kullanıcı yüzünde üst kavram olabilir; veri modelinde allocation, netting, write-off ve bank reconciliation ayrı event type’tır.
+
+Open-item impact persistence kanıtı (26 Ağustos 2026): Mutable remaining alanı oluşturmayan append-only allocation/unallocation/write-off impact defteri [teknik spike](../project/plans/2026-08-26-open-item-impact-persistence-spike.md) kapsamında PostgreSQL'e eklendi. Counter-event trigger'ı original türü, party account, due line, payment, currency ve amount eşitliğini zorlar; aynı event retry'ı yalnız immutable içerik tamamen eşleşirse kabul edilir. Bu teknik defter Treasury payment otoritesi, allocation/write-off onayı, FX veya GL posting politikası değildir.
+
+Authoritative open-item snapshot kanıtı (26 Ağustos 2026): Persisted due-line ve bütün immutable impact geçmişini aynı transaction/company scope içinde yükleyen [as-of loader](../project/plans/2026-08-26-authoritative-open-item-snapshot-loader-spike.md), remaining tutarını explicit effective date ve recorded cutoff'a göre domain katmanında türetir. Late-recorded unallocation geçmiş kesime sızmaz; cross-company due-line görünmez.
+
+Open-item concurrency kapasite kanıtı (26 Ağustos 2026): Due-line bazlı transaction lock ve DB net-capacity guard'ı [teknik spike](../project/plans/2026-08-26-open-item-capacity-concurrency-guard-spike.md) kapsamında eklendi. Paralel 40 + 30 GBP allocation, 60 GBP original due-line'ı aşamadı; owner-tamper 41 GBP write-off, 40 GBP due-line üzerinde reddedildi. Runtime due-line UPDATE yetkisi almadan append-only sınır korundu.
 
 ## 17. Ek rapor ve kabul
 

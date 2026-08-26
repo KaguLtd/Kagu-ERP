@@ -67,6 +67,12 @@ Authoritative dimension evidence loader, journal'ın posting-rule version kimli�
 
 Authoritative currency evidence loader, journal draft'ındaki exchange-rate ve rounding-policy snapshot'larını tenant/company scope içinde immutable PostgreSQL kanıtıyla birebir eşleştirir. Eksik, değiştirilmiş veya başka şirkete ait kanıt fail-closed reddedilir; parasal oranlar `numeric(28,12)` ile saklanır ve binary floating point kullanılmaz. Runtime evidence tablolarında yalnız `SELECT` yetkilidir. Kur sağlayıcısı seçimi, oran import/yayımlama workflow'u ve mali politika onayı bu teknik kanıtın dışındadır.
 
+Canonical journal preparation approval subject'ini source type, source event id ve expected source version'dan server-side türetir. Exact-version authoritative completed approval aynı PostgreSQL transaction'ında ve reservation/draft/audit/outbox'tan önce yüklenir; eksik veya eski sürümlü approval hiçbir journal fact üretmeden fail-closed davranır. Caller approval snapshot veya farklı subject kimliği sağlayamaz. Bu preparation hâlâ posted GL sonucu değildir.
+
+Journal posting composition, approval-gated canonical preparation sonucunu immutable posted journal'a aynı caller-owned PostgreSQL transaction'ında taşır ve preparation audit/outbox'ından ayrı posted audit/outbox fact'leri üretir. API idempotency kaydı posting'den önce acquire edilir ve yalnız bütün zincir başarılı olduğunda final posted response snapshot'ıyla aynı transaction içinde tamamlanır. Completed replay source/approval/posting zincirini yeniden çalıştırmadan ilk fiş sonucunu döndürür; changed payload conflict olur. Posted outbox yazımı dahil herhangi bir adım başarısızsa caller commit edemez ve idempotency dahil bütün fact'ler rollback edilir. Bu teknik akış public endpoint, yasal yevmiye numarası veya reversal politikası tanımlamaz.
+
+Posted journal persistence, validated draft'ı immutable header ve GL line snapshot'ına kopyalar; header aynı tenant/company kapsamındaki draft, period ve exact source-version approval'a FK ile bağlıdır. Runtime yalnız `SELECT/INSERT` yetkilidir. Deferred DB constraint trigger'ları commit anında line count ile debit/credit toplamlarını header'a cross-foot eder ve dengesiz sonucu reddeder. Internal `journal_id` yasal yevmiye numarası değildir; resmi numaralama ayrı onaylı policy ister.
+
 Transaction-bound audit ve outbox adaptörleri aynı connection/transaction içinde çağrıldığında rezervasyon, audit kanıtı ve dış olay niyeti atomik kalır. Bu üç kaydın birlikte bulunması yine posted journal anlamına gelmez; journal header/line persistence ve tüm posting kapıları ayrıca tamamlanmalıdır.
 
 ## 5. Manuel fişler
@@ -175,6 +181,8 @@ sonucunu verir. Fark varsa source-less line, missing posting, duplicate generati
 DocumentDate, EffectiveDate, RecordedAt ve PostedAt ayrıdır. Late-arriving document; GL/tax/inventory kilitlerini, cut-off ve açıklama politikasını kontrol eder. Hard-closed döneme geriye dönük yazmak yerine yetkili policy current correction period + original-period reference üretebilir; kural KKTC uzman onayına bağlıdır.
 
 Kesin fiş reverse entry ile düzeltilir. Repost yalnız source olay doğru, türetilmiş journal/projection hatalı veya kural versiyonu için resmen yeniden üretim gerekliyse kullanılır. Dry-run, old/new line diff, rule version, closed period ve filed tax etkisi olmadan execute edilemez.
+
+Posted reversal bağı original ve counter journal'ı tenant/company scope içinde immutable olarak ilişkilendirir. Bir original yalnız bir reversal alabilir; iki bağlantılı yarışta PostgreSQL unique lock tek kazanan üretir. DB guard line number, account, source line, dimensions, functional currency, debit/credit ve currency calculation snapshot'ının exact inverse olduğunu doğrular; reversal chain, update ve delete fail-closed'dur. Bu persistence kanıtı reversal tarihini, correction period'ı, permission/approval veya public command'ı seçmez.
 
 ## 15. Kapanış ve zorunlu mali rapor seti
 

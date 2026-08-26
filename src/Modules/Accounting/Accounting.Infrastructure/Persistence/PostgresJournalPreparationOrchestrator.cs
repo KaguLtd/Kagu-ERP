@@ -66,6 +66,17 @@ public static class PostgresJournalPreparationOrchestrator
                 "The canonical source version does not match the expected source version.");
         }
 
+        _ = await PostgresAuthoritativeApprovalCompletionLoader.LoadAsync(
+            connection,
+            transaction,
+            command.Scope,
+            command.SourceIdentity.TenantId,
+            command.SourceIdentity.CompanyId,
+            command.SourceIdentity.SourceType,
+            command.SourceIdentity.SourceEventId,
+            command.ExpectedSourceVersion,
+            cancellationToken);
+
         var request = new JournalPreparationRequest(
             command.Scope,
             command.AuditContext,

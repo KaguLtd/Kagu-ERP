@@ -11,6 +11,12 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Parties\Parties.Domain\KaguERP.Modules.Parties.Domain.csproj"
+                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\Modules\Treasury\Treasury.Domain\KaguERP.Modules.Treasury.Domain.csproj"
+                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\Modules\Treasury\Treasury.Infrastructure\KaguERP.Modules.Treasury.Infrastructure.csproj"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\..\src\Erp.Bootstrap\*.cs"
@@ -25,5 +31,17 @@
     <Compile Include="..\..\src\Modules\Accounting\Accounting.Infrastructure\**\*.cs"
              Exclude="..\..\src\Modules\Accounting\Accounting.Infrastructure\bin\**;..\..\src\Modules\Accounting\Accounting.Infrastructure\obj\**"
              LinkBase="Accounting.Infrastructure" />
+    <Compile Include="..\..\src\Modules\Parties\Parties.Domain\**\*.cs"
+             Exclude="..\..\src\Modules\Parties\Parties.Domain\bin\**;..\..\src\Modules\Parties\Parties.Domain\obj\**"
+             LinkBase="Parties.Domain" />
+    <Compile Include="..\..\src\Modules\Parties\Parties.Infrastructure\**\*.cs"
+             Exclude="..\..\src\Modules\Parties\Parties.Infrastructure\bin\**;..\..\src\Modules\Parties\Parties.Infrastructure\obj\**"
+             LinkBase="Parties.Infrastructure" />
+    <Compile Include="..\..\src\Modules\Treasury\Treasury.Domain\**\*.cs"
+             Exclude="..\..\src\Modules\Treasury\Treasury.Domain\bin\**;..\..\src\Modules\Treasury\Treasury.Domain\obj\**"
+             LinkBase="Treasury.Domain" />
+    <Compile Include="..\..\src\Modules\Treasury\Treasury.Infrastructure\**\*.cs"
+             Exclude="..\..\src\Modules\Treasury\Treasury.Infrastructure\bin\**;..\..\src\Modules\Treasury\Treasury.Infrastructure\obj\**"
+             LinkBase="Treasury.Infrastructure" />
   </ItemGroup>
 </Project>

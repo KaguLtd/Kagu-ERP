@@ -21,6 +21,17 @@ internal sealed class MigrationRunner(string connectionString)
         new("0010_account_posting_evidence", "0010_account_posting_evidence.sql"),
         new("0011_posting_dimension_evidence", "0011_posting_dimension_evidence.sql"),
         new("0012_currency_rounding_evidence", "0012_currency_rounding_evidence.sql"),
+        new("0013_approval_completion_evidence", "0013_approval_completion_evidence.sql"),
+        new("0014_posted_journal", "0014_posted_journal.sql"),
+        new("0015_posted_journal_balance_guard", "0015_posted_journal_balance_guard.sql"),
+        new("0016_posted_journal_reversal_link", "0016_posted_journal_reversal_link.sql"),
+        new("0017_posted_journal_reversal_currency_guard", "0017_posted_journal_reversal_currency_guard.sql"),
+        new("0018_party_account_due_schedule", "0018_party_account_due_schedule.sql"),
+        new("0019_open_item_impact_event", "0019_open_item_impact_event.sql"),
+        new("0020_open_item_capacity_guard", "0020_open_item_capacity_guard.sql"),
+        new("0021_open_item_capacity_guard_privilege", "0021_open_item_capacity_guard_privilege.sql"),
+        new("0022_payment_economic_event", "0022_payment_economic_event.sql"),
+        new("0023_statement_line", "0023_statement_line.sql"),
     ];
 
     public async Task<int> RunAsync(CancellationToken cancellationToken)

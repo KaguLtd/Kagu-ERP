@@ -37,11 +37,17 @@
   <Folder Name="/src/Modules/Parties/Parties.Domain/">
     <Project Path="src/Modules/Parties/Parties.Domain/KaguERP.Modules.Parties.Domain.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Parties/Parties.Infrastructure/">
+    <Project Path="src/Modules/Parties/Parties.Infrastructure/KaguERP.Modules.Parties.Infrastructure.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Reporting/Reporting.Domain/">
     <Project Path="src/Modules/Reporting/Reporting.Domain/KaguERP.Modules.Reporting.Domain.csproj" />
   </Folder>
   <Folder Name="/src/Modules/Treasury/Treasury.Domain/">
     <Project Path="src/Modules/Treasury/Treasury.Domain/KaguERP.Modules.Treasury.Domain.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Treasury/Treasury.Infrastructure/">
+    <Project Path="src/Modules/Treasury/Treasury.Infrastructure/KaguERP.Modules.Treasury.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/tests/" />
   <Folder Name="/tests/Architecture/">

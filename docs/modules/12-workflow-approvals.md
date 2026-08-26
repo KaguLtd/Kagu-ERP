@@ -84,6 +84,8 @@ ApprovalStep yalnız approver count değil distinct-person quorum taşır. Aynı
 
 Tamamlanmış onay kanıtı tenant, company, approval instance, workflow version ve kaynak subject type/id/version birleşimine immutable bağlanır. Karar kimlikleri ve approver kimlikleri tekildir; maker karar kümesinde bulunamaz ve distinct karar sayısı policy'nin verdiği required quorum'u karşılamalıdır. Bu kanıt quorum veya uygun onaycı politikasını kendi başına belirlemez; yalnız authoritative, sürümlü policy sonucunun posting gibi kritik consumer'lar tarafından fail-closed doğrulanabileceği parametrik sözleşmedir.
 
+Completed evidence PostgreSQL'de workflow-owned instance ve decision snapshot'ları olarak append-only saklanır. Runtime rolü bu tablolarda yalnız `SELECT` yetkilidir; tenant/company forced RLS uygulanır. Kritik consumer exact subject type/id/version için tek snapshot yükler, kararları yeniden invariant doğrulamasından geçirir ve eksik, eski sürümlü veya kapsam dışı kanıtta fail-closed davranır. Evidence tablosuna doğrudan runtime yazma, workflow karar komutunun yerini alamaz.
+
 Delegation:
 
 - başlangıç/bitiş, kapsam, reason ve delegator/delegatee taşır;
