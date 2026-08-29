@@ -32,6 +32,18 @@ internal sealed class MigrationRunner(string connectionString)
         new("0021_open_item_capacity_guard_privilege", "0021_open_item_capacity_guard_privilege.sql"),
         new("0022_payment_economic_event", "0022_payment_economic_event.sql"),
         new("0023_statement_line", "0023_statement_line.sql"),
+        new("0024_reconciliation_proposal", "0024_reconciliation_proposal.sql"),
+        new("0025_report_projection_generation", "0025_report_projection_generation.sql"),
+        new("0026_party_statement_projection", "0026_party_statement_projection.sql"),
+        new("0027_aging_policy_projection_snapshot", "0027_aging_policy_projection_snapshot.sql"),
+        new("0028_party_aging_projection", "0028_party_aging_projection.sql"),
+        new("0029_control_account_balance_projection", "0029_control_account_balance_projection.sql"),
+        new("0030_party_account_balance_side_expand", "0030_party_account_balance_side_expand.sql"),
+        new("0031_party_account_opening_event", "0031_party_account_opening_event.sql"),
+        new("0032_party_due_source_posting_identity_expand", "0032_party_due_source_posting_identity_expand.sql"),
+        new("0033_open_item_impact_source_identity_expand", "0033_open_item_impact_source_identity_expand.sql"),
+        new("0034_open_item_restriction_event", "0034_open_item_restriction_event.sql"),
+        new("0035_open_item_restriction_guard_privilege", "0035_open_item_restriction_guard_privilege.sql"),
     ];
 
     public async Task<int> RunAsync(CancellationToken cancellationToken)

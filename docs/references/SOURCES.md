@@ -6,6 +6,7 @@ Araştırma kesim tarihi: **19 Ağustos 2026**. Teknik sorularda birincil/resmi 
 
 ### Gelir ve Vergi Dairesi
 
+- [27/1977 Vergi Usul Yasası — değiştirilmiş ve birleştirilmiş resmi PDF](https://mevzuat.gov.ct.tr/Portals/48/27-1977%20VERGI%20USUL%20YASASI.pdf) — madde 114 normal hesap dönemini takvim yılı olarak tanımlar; özel on iki aylık dönem Vergi Dairesi kararına bağlıdır. Madde 115 muhasebe usulü ve olası tekdüzen düzenleme yetkisini açıklar.
 - [KKTC Tekdüzen Hesap Planı](https://www.vergi.gov.ct.tr/?q=content%2Fkktc-tekd%C3%BCzen-hesap-plani) — hesap planı resmi yayın noktası.
 - [Tekdüzen muhasebe yazılımında yetkili bilgisayar programcıları](https://www.vergi.gov.ct.tr/?q=content%2Ftekd%C3%BCzen-muhasebe-yaz%C4%B1l%C4%B1m%C4%B1nda-yetkili-bilgisayar-programc%C4%B1lar%C4%B1) — yazılım/programcı yetkilendirmesi için başlangıç kaynağı.
 - [E-fatura yardım dosyaları ve kılavuzlar](https://efatura.vergi.gov.ct.tr/?q=content%2Fyard%C4%B1m-dosyalar%C4%B1-ve-klavuzlar) — teknik şema ve rehberlerin resmi yayın noktası.

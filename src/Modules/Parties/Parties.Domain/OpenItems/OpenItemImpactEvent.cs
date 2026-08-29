@@ -13,6 +13,9 @@ public sealed record OpenItemImpactEvent
         Guid dueScheduleLineId,
         Guid? paymentId,
         AllocationCurrencyCode currency,
+        string sourceType,
+        long sourceVersion,
+        string sourcePostingPurpose,
         OpenItemImpactKind kind,
         decimal amount,
         DateOnly effectiveDate,
@@ -26,6 +29,9 @@ public sealed record OpenItemImpactEvent
         DueScheduleLineId = dueScheduleLineId;
         PaymentId = paymentId;
         Currency = currency;
+        SourceType = sourceType;
+        SourceVersion = sourceVersion;
+        SourcePostingPurpose = sourcePostingPurpose;
         Kind = kind;
         Amount = amount;
         EffectiveDate = effectiveDate;
@@ -47,6 +53,12 @@ public sealed record OpenItemImpactEvent
 
     public AllocationCurrencyCode Currency { get; }
 
+    public string SourceType { get; }
+
+    public long SourceVersion { get; }
+
+    public string SourcePostingPurpose { get; }
+
     public OpenItemImpactKind Kind { get; }
 
     public decimal Amount { get; }
@@ -65,6 +77,9 @@ public sealed record OpenItemImpactEvent
         Guid dueScheduleLineId,
         Guid? paymentId,
         AllocationCurrencyCode? currency,
+        string sourceType,
+        long sourceVersion,
+        string sourcePostingPurpose,
         OpenItemImpactKind kind,
         decimal amount,
         DateOnly effectiveDate,
@@ -77,6 +92,20 @@ public sealed record OpenItemImpactEvent
         RequireId(partyAccountId, "OPEN_ITEM_PARTY_ACCOUNT_REQUIRED", "Open-item party-account ID is required.");
         RequireId(dueScheduleLineId, "OPEN_ITEM_DUE_LINE_REQUIRED", "Open-item due-schedule line ID is required.");
         ArgumentNullException.ThrowIfNull(currency);
+        string normalizedSourceType = RequireText(
+            sourceType,
+            "OPEN_ITEM_SOURCE_TYPE_INVALID",
+            "Open-item source type is required and cannot exceed 120 characters.");
+        if (sourceVersion <= 0)
+        {
+            throw new PartyOpenItemInvariantException(
+                "OPEN_ITEM_SOURCE_VERSION_INVALID",
+                "Open-item source version must be positive.");
+        }
+        string normalizedPostingPurpose = RequireText(
+            sourcePostingPurpose,
+            "OPEN_ITEM_POSTING_PURPOSE_INVALID",
+            "Open-item posting purpose is required and cannot exceed 120 characters.");
 
         if (!Enum.IsDefined(kind))
         {
@@ -135,6 +164,9 @@ public sealed record OpenItemImpactEvent
             dueScheduleLineId,
             paymentId,
             currency,
+            normalizedSourceType,
+            sourceVersion,
+            normalizedPostingPurpose,
             kind,
             amount,
             effectiveDate,
@@ -148,5 +180,19 @@ public sealed record OpenItemImpactEvent
         {
             throw new PartyOpenItemInvariantException(code, message);
         }
+    }
+
+    private static string RequireText(string value, string code, string message)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new PartyOpenItemInvariantException(code, message);
+        }
+        string normalized = value.Trim();
+        if (normalized.Length > 120)
+        {
+            throw new PartyOpenItemInvariantException(code, message);
+        }
+        return normalized;
     }
 }

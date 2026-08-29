@@ -60,6 +60,7 @@ Desktop.ini
 *.wal
 
 # Temporary files
+.tmp-architecture-host/
 *.tmp
 *.temp
 *.swp

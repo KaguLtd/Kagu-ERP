@@ -105,3 +105,11 @@ Parallel gateway’de tüm/çoğunluk/any-one semantiği açık policy’dir. Re
 Kontrol raporu approval instance, rule snapshot, eligible approver set, karar sırası, delegation, SLA exception ve aynı kişinin kritik görevlerdeki rol çakışmasını gösterir.
 
 Ek testler quorum bypass, role değişirken açık görev, tutar/IBAN değişiminde reset, delegation expiry, paralel yarış ve retry idempotency’yi kapsar.
+
+## 11. Kagu Ltd. başlangıç onay politikası
+
+- Normal elle girilmiş satış/alış belgesi ile otomatik source posting, ilgili permission ve validation tamamlandığında ek insan onayı istemez.
+- Direct manual GL journal, opening import/posting, write-off ve diğer `critical` sınıflar hazırlayandan farklı tek yönetici onayı ister.
+- Hard-close reopen tek-yönetici kuralının istisnasıdır: iki farklı insanın onayı, gerekçe, scope, süre ve yeniden kapanış fark raporu gerekir.
+- Hazırlayan kendi kritik işlemini onaylayamaz. Yöneticilik, permission kopyalama, delegation veya break-glass bu kuralı kaldırmaz.
+- Tutar bazlı kademeler altyapıda tutulur fakat başlangıçta etkin değildir. İleride açıldığında policy version ve functional rate snapshot ile deterministik değerlendirilir.

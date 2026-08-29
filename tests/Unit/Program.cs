@@ -9,7 +9,12 @@ using AccountingReversals = KaguERP.Modules.Accounting.Domain.Reversals;
 using ApprovalApplication = KaguERP.BuildingBlocks.Application.Approvals;
 using PartyAllocations = KaguERP.Modules.Parties.Domain.Allocations;
 using PartyDueSchedules = KaguERP.Modules.Parties.Domain.DueSchedules;
+using PartyOpeningApplication = KaguERP.Modules.Parties.Application.Openings;
+using PartyOpenings = KaguERP.Modules.Parties.Domain.Openings;
 using PartyOpenItems = KaguERP.Modules.Parties.Domain.OpenItems;
+using PartyReportContracts = KaguERP.Modules.Parties.Contracts.Reports;
+using PartyRestrictionApplication = KaguERP.Modules.Parties.Application.OpenItems;
+using ReportingApplication = KaguERP.Modules.Reporting.Application.PartyReports;
 using ReportingControlAccounts = KaguERP.Modules.Reporting.Domain.ControlAccounts;
 using ReportingParty = KaguERP.Modules.Reporting.Domain.PartyReports;
 using TreasuryPayments = KaguERP.Modules.Treasury.Domain.Payments;
@@ -53,6 +58,9 @@ var checks = new (string Name, Action Run)[]
     ("PARTY-DUE-002 due-schedule scope isolation", DueScheduleScopeIsEnforced),
     ("PARTY-OI-001 bitemporal remaining derivation", OpenItemRemainingIsDerivedAsOf),
     ("PARTY-OI-002 append-only counter-event boundaries", OpenItemCounterEventsAreEnforced),
+    ("PARTY-OI-003 bitemporal dispute and block evidence", OpenItemRestrictionEvidenceIsDerivedAsOf),
+    ("PARTY-ACC-002 opening source boundaries", PartyAccountOpeningBoundariesAreEnforced),
+    ("PARTY-ACC-002 opening preparation permission", PartyAccountOpeningPermissionAndScopeFailClosed),
     ("PARTY-INV-004 payment allocation bitemporal derivation", PaymentAllocationIsDerivedAsOf),
     ("PARTY-INV-004 payment allocation scope and capacity", PaymentAllocationScopeAndCapacityAreEnforced),
     ("PARTY-INV-004 exact unallocation linkage", PaymentUnallocationLinkageIsEnforced),
@@ -69,6 +77,8 @@ var checks = new (string Name, Action Run)[]
     ("RPT-PARTY-001 bitemporal statement running balance", PartyStatementIsDerivedBitemporally),
     ("RPT-PARTY-002 explicit aging policy and totals", PartyAgingPolicyAndTotalsAreEnforced),
     ("RPT-PARTY-002 statement-aging exact cross-foot", PartyStatementAgingCrossFootIsEnforced),
+    ("RPT-PARTY source contract bitemporal boundaries", PartyReportSourceContractBoundariesAreEnforced),
+    ("RPT-PARTY source projection exact cross-foot", PartyReportSourceProjectionCrossFootIsEnforced),
     ("MP-03 golden receivable-to-report exact cross-foot", GoldenPartyCollectionCycleCrossFootIsExact),
     ("API-003 authorized journal posting candidate", AuthorizedPostingCandidateRequiresCompleteEvidence),
     ("API-003 journal posting permission and scope", PostingCandidatePermissionAndScopeFailClosed),
@@ -77,6 +87,280 @@ var checks = new (string Name, Action Run)[]
     ("WFL-INV-003 approval maker-checker", ApprovalEvidenceRejectsMakerCheckerConflict),
     ("Workflow distinct-person quorum", ApprovalEvidenceRequiresDistinctQuorum),
 };
+
+static void OpenItemRestrictionEvidenceIsDerivedAsOf()
+{
+    Guid tenantId = Guid.NewGuid();
+    Guid companyId = Guid.NewGuid();
+    Guid partyAccountId = Guid.NewGuid();
+    Guid dueLineId = Guid.NewGuid();
+    DateTimeOffset recordedAt = new(2026, 8, 28, 9, 0, 0, TimeSpan.Zero);
+    PartyOpenItems.OpenItemRestrictionEvent dispute = PartyOpenItems.OpenItemRestrictionEvent.Create(
+        Guid.NewGuid(), tenantId, companyId, partyAccountId, dueLineId,
+        PartyOpenItems.OpenItemRestrictionKind.Dispute,
+        PartyOpenItems.OpenItemRestrictionAction.Applied,
+        "invoice-under-review", new DateOnly(2026, 8, 1), recordedAt);
+    PartyOpenItems.OpenItemRestrictionEvent disputeRelease = PartyOpenItems.OpenItemRestrictionEvent.Create(
+        Guid.NewGuid(), tenantId, companyId, partyAccountId, dueLineId,
+        PartyOpenItems.OpenItemRestrictionKind.Dispute,
+        PartyOpenItems.OpenItemRestrictionAction.Released,
+        "review-resolved", new DateOnly(2026, 8, 3), recordedAt.AddMinutes(2), dispute.EventId);
+    PartyOpenItems.OpenItemRestrictionEvent collectionBlock = PartyOpenItems.OpenItemRestrictionEvent.Create(
+        Guid.NewGuid(), tenantId, companyId, partyAccountId, dueLineId,
+        PartyOpenItems.OpenItemRestrictionKind.CollectionBlock,
+        PartyOpenItems.OpenItemRestrictionAction.Applied,
+        "legal-hold", new DateOnly(2026, 8, 2), recordedAt.AddMinutes(3));
+
+    PartyOpenItems.DerivedOpenItemRestrictionSnapshot historical =
+        PartyOpenItems.DerivedOpenItemRestrictionSnapshot.Create(
+            tenantId, companyId, partyAccountId, dueLineId, new DateOnly(2026, 8, 31),
+            recordedAt.AddMinutes(1), [dispute, disputeRelease, collectionBlock]);
+    Equal(true, historical.IsDisputed && !historical.IsCollectionBlocked && historical.ConsideredEvents.Count == 1,
+        "Late-recorded restriction changes leaked into the historical cutoff.");
+    PartyOpenItems.DerivedOpenItemRestrictionSnapshot current =
+        PartyOpenItems.DerivedOpenItemRestrictionSnapshot.Create(
+            tenantId, companyId, partyAccountId, dueLineId, new DateOnly(2026, 8, 31),
+            recordedAt.AddMinutes(4), [dispute, disputeRelease, collectionBlock]);
+    Equal(true, !current.IsDisputed && current.IsCollectionBlocked && current.ConsideredEvents.Count == 3,
+        "Restriction release and independent collection block were not derived exactly.");
+
+    PartyOpenItems.OpenItemRestrictionEvent wrongKindRelease = PartyOpenItems.OpenItemRestrictionEvent.Create(
+        Guid.NewGuid(), tenantId, companyId, partyAccountId, dueLineId,
+        PartyOpenItems.OpenItemRestrictionKind.CollectionBlock,
+        PartyOpenItems.OpenItemRestrictionAction.Released,
+        "invalid-release", new DateOnly(2026, 8, 4), recordedAt.AddMinutes(4), dispute.EventId);
+    PartyDueSchedules.PartyOpenItemInvariantException releaseConflict =
+        Throws<PartyDueSchedules.PartyOpenItemInvariantException>(() =>
+            PartyOpenItems.DerivedOpenItemRestrictionSnapshot.Create(
+                tenantId, companyId, partyAccountId, dueLineId, new DateOnly(2026, 8, 31),
+                recordedAt.AddMinutes(5), [dispute, wrongKindRelease]));
+    Equal("OPEN_ITEM_RESTRICTION_RELEASE_CONFLICT", releaseConflict.Code,
+        "A release was allowed to target a different restriction kind.");
+
+    var allowedScope = new ExecutionScope(
+        tenantId,
+        Guid.NewGuid(),
+        [new CompanyAccess(
+            companyId,
+            [PartyRestrictionApplication.AuthorizedOpenItemRestrictionChange.RequiredPermission])]);
+    PartyRestrictionApplication.AuthorizedOpenItemRestrictionChange authorized =
+        PartyRestrictionApplication.AuthorizedOpenItemRestrictionChange.Create(allowedScope, dispute);
+    Equal(dispute.EventId, authorized.RestrictionEvent.EventId,
+        "Authorized restriction command changed the immutable event.");
+    Throws<PartyRestrictionApplication.OpenItemRestrictionAuthorizationException>(() =>
+        PartyRestrictionApplication.AuthorizedOpenItemRestrictionChange.Create(
+            new ExecutionScope(tenantId, Guid.NewGuid(), [companyId]), dispute));
+}
+
+static void PartyAccountOpeningBoundariesAreEnforced()
+{
+    Guid tenantId = Guid.NewGuid();
+    Guid companyId = Guid.NewGuid();
+    Guid openingEventId = Guid.NewGuid();
+    Guid partyAccountId = Guid.NewGuid();
+    DateOnly effectiveDate = new(2026, 1, 1);
+    DateTimeOffset recordedAt = new(2026, 8, 27, 9, 0, 0, TimeSpan.Zero);
+
+    PartyOpenings.PartyAccountOpeningDraft valid = PartyOpenings.PartyAccountOpeningDraft.Create(
+        tenantId,
+        companyId,
+        openingEventId,
+        partyAccountId,
+        PartyOpenings.PartyAccountOpeningEntrySide.Debit,
+        1000.1234m,
+        effectiveDate,
+        recordedAt);
+    Equal(PartyOpenings.PartyAccountOpeningDraft.SourceType, "party.account-opening",
+        "Opening source type is not canonical.");
+    Equal(PartyOpenings.PartyAccountOpeningDraft.PostingPurpose, "party.account-opening.post",
+        "Opening posting purpose is not canonical.");
+    Equal(1L, valid.SourceVersion, "Opening source must begin at immutable version one.");
+    Equal(1000.1234m, valid.OriginalAmount, "Opening amount changed during validation.");
+
+    ExpectPartyOpeningInvariant(
+        "PARTY_OPENING_AMOUNT_INVALID",
+        () => PartyOpenings.PartyAccountOpeningDraft.Create(
+            tenantId, companyId, openingEventId, partyAccountId,
+            PartyOpenings.PartyAccountOpeningEntrySide.Debit, 0m, effectiveDate, recordedAt));
+    ExpectPartyOpeningInvariant(
+        "PARTY_OPENING_AMOUNT_SCALE_INVALID",
+        () => PartyOpenings.PartyAccountOpeningDraft.Create(
+            tenantId, companyId, openingEventId, partyAccountId,
+            PartyOpenings.PartyAccountOpeningEntrySide.Debit, 1.00001m, effectiveDate, recordedAt));
+    ExpectPartyOpeningInvariant(
+        "PARTY_OPENING_ENTRY_SIDE_INVALID",
+        () => PartyOpenings.PartyAccountOpeningDraft.Create(
+            tenantId, companyId, openingEventId, partyAccountId,
+            (PartyOpenings.PartyAccountOpeningEntrySide)3, 1m, effectiveDate, recordedAt));
+    ExpectPartyOpeningInvariant(
+        "PARTY_OPENING_EFFECTIVE_DATE_REQUIRED",
+        () => PartyOpenings.PartyAccountOpeningDraft.Create(
+            tenantId, companyId, openingEventId, partyAccountId,
+            PartyOpenings.PartyAccountOpeningEntrySide.Credit, 1m, default, recordedAt));
+    ExpectPartyOpeningInvariant(
+        "PARTY_OPENING_RECORDED_AT_NOT_UTC",
+        () => PartyOpenings.PartyAccountOpeningDraft.Create(
+            tenantId, companyId, openingEventId, partyAccountId,
+            PartyOpenings.PartyAccountOpeningEntrySide.Credit, 1m, effectiveDate,
+            recordedAt.ToOffset(TimeSpan.FromHours(3))));
+}
+
+static void PartyAccountOpeningPermissionAndScopeFailClosed()
+{
+    Guid tenantId = Guid.NewGuid();
+    Guid companyId = Guid.NewGuid();
+    Guid actorId = Guid.NewGuid();
+    PartyOpenings.PartyAccountOpeningDraft draft = PartyOpenings.PartyAccountOpeningDraft.Create(
+        tenantId,
+        companyId,
+        Guid.NewGuid(),
+        Guid.NewGuid(),
+        PartyOpenings.PartyAccountOpeningEntrySide.Debit,
+        25m,
+        new DateOnly(2026, 1, 1),
+        new DateTimeOffset(2026, 8, 27, 9, 0, 0, TimeSpan.Zero));
+
+    var permittedScope = new ExecutionScope(
+        tenantId,
+        actorId,
+        [new CompanyAccess(companyId, [PartyOpeningApplication.AuthorizedPartyAccountOpeningPreparation.RequiredPermission])]);
+    PartyOpeningApplication.AuthorizedPartyAccountOpeningPreparation authorized =
+        PartyOpeningApplication.AuthorizedPartyAccountOpeningPreparation.Create(permittedScope, draft);
+    Equal(actorId, authorized.ActorId, "Opening preparation did not retain the authorized actor.");
+    Equal(draft, authorized.Draft, "Opening preparation did not retain the validated source.");
+
+    var missingPermission = new ExecutionScope(tenantId, actorId, [companyId]);
+    PartyOpeningApplication.PartyAccountOpeningAuthorizationException permissionException =
+        Throws<PartyOpeningApplication.PartyAccountOpeningAuthorizationException>(() =>
+            PartyOpeningApplication.AuthorizedPartyAccountOpeningPreparation.Create(missingPermission, draft));
+    Equal("PARTY_OPENING_PERMISSION_REQUIRED", permissionException.Code,
+        "Opening preparation did not fail with the expected permission code.");
+
+    var wrongCompany = new ExecutionScope(tenantId, actorId, [Guid.NewGuid()]);
+    Throws<ExecutionScopeDeniedException>(() =>
+        PartyOpeningApplication.AuthorizedPartyAccountOpeningPreparation.Create(wrongCompany, draft));
+}
+
+static void ExpectPartyOpeningInvariant(string expectedCode, Action action)
+{
+    PartyOpenings.PartyAccountOpeningInvariantException exception =
+        Throws<PartyOpenings.PartyAccountOpeningInvariantException>(action);
+    Equal(expectedCode, exception.Code, "Unexpected PartyAccount opening invariant code.");
+}
+
+static void PartyReportSourceProjectionCrossFootIsEnforced()
+{
+    Guid tenantId = Guid.NewGuid();
+    Guid companyId = Guid.NewGuid();
+    Guid partyAccountId = Guid.NewGuid();
+    Guid controlAccountId = Guid.NewGuid();
+    DateOnly asOf = new(2026, 8, 27);
+    DateTimeOffset cutoff = new(2026, 8, 27, 12, 0, 0, TimeSpan.Zero);
+    var impact = new PartyReportContracts.PartyReportImpactFact(
+        Guid.NewGuid(), PartyReportContracts.PartyReportImpactKind.Allocation, Guid.NewGuid(),
+        10m, asOf.AddDays(-1), cutoff.AddMinutes(-1), null);
+    var item = new PartyReportContracts.PartyOpenItemSourceFact(
+        Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "sales.invoice", 50m, 40m,
+        asOf.AddDays(-10), asOf.AddDays(10), cutoff.AddMinutes(-2),
+        PartyReportContracts.PartyReportRestrictionEvidence.Unavailable, [impact]);
+    PartyReportContracts.PartyReportSourceBatch source = PartyReportContracts.PartyReportSourceBatch.Create(
+        tenantId, companyId, partyAccountId, controlAccountId,
+        PartyReportContracts.PartyReportBalanceSide.Receivable, "GBP", asOf, cutoff, 0m,
+        "event:1", "event:2", [item]);
+
+    ReportingParty.ValidatedPartyStatement statement = ReportingApplication.PartyReportProjectionBuilder.BuildStatement(
+        source, "party.account.detail", Guid.NewGuid(), 1, Guid.NewGuid(), cutoff.AddMinutes(1));
+    Equal(40m, statement.ClosingExposure, "Source facts did not produce the exact statement closing exposure.");
+    Equal(2, statement.Lines.Count, "Open item and impact were not normalized into statement events.");
+
+    ReportingParty.CalendarDayAgingPolicySnapshot policy = ReportingParty.CalendarDayAgingPolicySnapshot.Create(
+        tenantId, companyId, Guid.NewGuid(), 1,
+        [ReportingParty.CalendarDayAgingBucket.Create("all", int.MinValue, int.MaxValue)]);
+    ReportingControlAccounts.ReportingInvariantException unavailable = Throws<ReportingControlAccounts.ReportingInvariantException>(() =>
+        ReportingApplication.PartyReportProjectionBuilder.BuildAging(
+            source, policy, "party.account.detail", Guid.NewGuid(), 1, Guid.NewGuid(), cutoff.AddMinutes(1)));
+    Equal("PARTY_RESTRICTION_EVIDENCE_UNAVAILABLE", unavailable.Code,
+        "Unavailable restriction evidence was silently treated as clear.");
+    PartyReportContracts.PartyReportSourceBatch clearSource = PartyReportContracts.PartyReportSourceBatch.Create(
+        tenantId, companyId, partyAccountId, controlAccountId,
+        PartyReportContracts.PartyReportBalanceSide.Receivable, "GBP", asOf, cutoff, 0m,
+        "event:1", "event:2",
+        [item with { RestrictionEvidence = PartyReportContracts.PartyReportRestrictionEvidence.Clear }]);
+    ReportingParty.ValidatedPartyAgingReport aging = ReportingApplication.PartyReportProjectionBuilder.BuildAging(
+        clearSource, policy, "party.account.detail", Guid.NewGuid(), 1, Guid.NewGuid(), cutoff.AddMinutes(1));
+    Equal(40m, aging.TotalRemaining, "Aging total did not preserve the source remaining amount.");
+    ReportingApplication.PartyReportProjectionBuilder.ProjectionPair pair =
+        ReportingApplication.PartyReportProjectionBuilder.BuildPair(
+            clearSource, policy, "party.account.detail", Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            1, Guid.NewGuid(), cutoff.AddMinutes(1));
+    Equal(pair.Statement.ReportSlice.ReportCode, pair.Aging.ReportSlice.ReportCode,
+        "Statement and aging did not use the same report definition.");
+    Equal(pair.Statement.ReportSlice.ProjectionGenerationId, pair.Aging.ReportSlice.ProjectionGenerationId,
+        "Statement and aging did not use the same projection generation.");
+    Equal(40m, pair.CrossFoot.Statement.ClosingExposure,
+        "Projection pair did not cross-foot at construction time.");
+
+    PartyReportContracts.PartyReportSourceBatch inconsistent = PartyReportContracts.PartyReportSourceBatch.Create(
+        tenantId, companyId, partyAccountId, controlAccountId,
+        PartyReportContracts.PartyReportBalanceSide.Receivable, "GBP", asOf, cutoff, 0m,
+        "event:1", "event:2", [item with { RemainingAmount = 39m }]);
+    ReportingControlAccounts.ReportingInvariantException mismatch = Throws<ReportingControlAccounts.ReportingInvariantException>(() =>
+        ReportingApplication.PartyReportProjectionBuilder.BuildStatement(
+            inconsistent, "party.account.detail", Guid.NewGuid(), 1, Guid.NewGuid(), cutoff.AddMinutes(1)));
+    Equal("PARTY_SOURCE_CROSS_FOOT_MISMATCH", mismatch.Code,
+        "Inconsistent source remaining amount passed statement cross-foot.");
+}
+
+static void PartyReportSourceContractBoundariesAreEnforced()
+{
+    Guid tenantId = Guid.NewGuid();
+    Guid companyId = Guid.NewGuid();
+    DateOnly asOf = new(2026, 8, 27);
+    DateTimeOffset cutoff = new(2026, 8, 27, 12, 0, 0, TimeSpan.Zero);
+    var impact = new PartyReportContracts.PartyReportImpactFact(
+        Guid.NewGuid(), PartyReportContracts.PartyReportImpactKind.Allocation, Guid.NewGuid(),
+        10m, asOf, cutoff.AddMinutes(-1), null);
+    var item = new PartyReportContracts.PartyOpenItemSourceFact(
+        Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "sales.invoice", 50m, 40m, asOf.AddDays(-5), asOf,
+        cutoff.AddMinutes(-2),
+        PartyReportContracts.PartyReportRestrictionEvidence.Unavailable, [impact]);
+    PartyReportContracts.PartyReportSourceBatch batch = PartyReportContracts.PartyReportSourceBatch.Create(
+        tenantId, companyId, Guid.NewGuid(), Guid.NewGuid(),
+        PartyReportContracts.PartyReportBalanceSide.Receivable, "GBP", asOf, cutoff, 0m,
+        "event:1", "event:2", [item]);
+    Equal(PartyReportContracts.PartyReportRestrictionEvidence.Unavailable,
+        batch.OpenItems[0].RestrictionEvidence,
+        "Unavailable dispute/block evidence was silently converted to clear.");
+    PartyReportContracts.PartyReportSourceBatch replay = PartyReportContracts.PartyReportSourceBatch.Create(
+        batch.TenantId, batch.CompanyId, batch.PartyAccountId, batch.ControlAccountId,
+        batch.BalanceSide, batch.Currency, batch.EffectiveAsOf, batch.RecordedCutoff,
+        batch.OpeningExposure, batch.SourceWatermarkFrom, batch.SourceWatermarkTo, [item]);
+    Equal(batch.SourceChecksumSha256, replay.SourceChecksumSha256,
+        "Equivalent source facts did not produce a deterministic checksum.");
+    Equal(64, batch.SourceChecksumSha256.Length, "Source checksum is not SHA-256 length.");
+    PartyReportContracts.PartyReportSourceBatch changedWatermark = PartyReportContracts.PartyReportSourceBatch.Create(
+        batch.TenantId, batch.CompanyId, batch.PartyAccountId, batch.ControlAccountId,
+        batch.BalanceSide, batch.Currency, batch.EffectiveAsOf, batch.RecordedCutoff,
+        batch.OpeningExposure, batch.SourceWatermarkFrom, "event:3", [item]);
+    Equal(false, batch.SourceChecksumSha256 == changedWatermark.SourceChecksumSha256,
+        "Changed source lineage reused the same checksum.");
+
+    Throws<ArgumentException>(() => PartyReportContracts.PartyReportSourceBatch.Create(
+        tenantId, companyId, Guid.NewGuid(), Guid.NewGuid(),
+        PartyReportContracts.PartyReportBalanceSide.Receivable, "GBP", asOf,
+        cutoff.ToOffset(TimeSpan.FromHours(3)), 0m, "event:1", "event:2", [item]));
+    var lateImpact = impact with { EventId = Guid.NewGuid(), RecordedAt = cutoff.AddSeconds(1) };
+    var lateItem = item with { OpenItemId = Guid.NewGuid(), Impacts = [lateImpact] };
+    Throws<ArgumentException>(() => PartyReportContracts.PartyReportSourceBatch.Create(
+        tenantId, companyId, Guid.NewGuid(), Guid.NewGuid(),
+        PartyReportContracts.PartyReportBalanceSide.Receivable, "GBP", asOf, cutoff, 0m,
+        "event:1", "event:2", [lateItem]));
+    var lateOrigin = item with { OpenItemId = Guid.NewGuid(), RecordedAt = cutoff.AddSeconds(1) };
+    Throws<ArgumentException>(() => PartyReportContracts.PartyReportSourceBatch.Create(
+        tenantId, companyId, Guid.NewGuid(), Guid.NewGuid(),
+        PartyReportContracts.PartyReportBalanceSide.Receivable, "GBP", asOf, cutoff, 0m,
+        "event:1", "event:2", [lateOrigin]));
+}
 
 static void ApprovalEvidenceBindsExactSubjectVersion()
 {
@@ -2072,6 +2356,38 @@ static void OpenItemCounterEventsAreEnforced()
         "OPEN_ITEM_EVENT_AMOUNT_INVALID",
         () => CreateOpenItemEvent(dueLine, PartyOpenItems.OpenItemImpactKind.Allocation, 0m));
     ExpectPartyOpenItemInvariant(
+        "OPEN_ITEM_SOURCE_TYPE_INVALID",
+        () => CreateOpenItemEvent(
+            dueLine,
+            PartyOpenItems.OpenItemImpactKind.Allocation,
+            1m,
+            sourceType: " "));
+    ExpectPartyOpenItemInvariant(
+        "OPEN_ITEM_SOURCE_VERSION_INVALID",
+        () => CreateOpenItemEvent(
+            dueLine,
+            PartyOpenItems.OpenItemImpactKind.Allocation,
+            1m,
+            sourceVersion: 0));
+    ExpectPartyOpenItemInvariant(
+        "OPEN_ITEM_POSTING_PURPOSE_INVALID",
+        () => CreateOpenItemEvent(
+            dueLine,
+            PartyOpenItems.OpenItemImpactKind.Allocation,
+            1m,
+            sourcePostingPurpose: " "));
+    var normalizedSource = CreateOpenItemEvent(
+        dueLine,
+        PartyOpenItems.OpenItemImpactKind.Allocation,
+        1m,
+        sourceType: " party.payment-allocation ",
+        sourcePostingPurpose: " party.payment-allocation.post ");
+    Equal("party.payment-allocation", normalizedSource.SourceType, "Impact source type was not normalized.");
+    Equal(
+        "party.payment-allocation.post",
+        normalizedSource.SourcePostingPurpose,
+        "Impact posting purpose was not normalized.");
+    ExpectPartyOpenItemInvariant(
         "OPEN_ITEM_EVENT_KIND_INVALID",
         () => CreateOpenItemEvent(dueLine, (PartyOpenItems.OpenItemImpactKind)99, 1m));
     ExpectPartyOpenItemInvariant(
@@ -3286,7 +3602,10 @@ static PartyOpenItems.OpenItemImpactEvent CreateOpenItemEvent(
     Guid? partyAccountId = null,
     Guid? dueLineId = null,
     PartyAllocations.AllocationCurrencyCode? currency = null,
-    Guid? paymentId = null)
+    Guid? paymentId = null,
+    string sourceType = "party.test-impact",
+    long sourceVersion = 1,
+    string sourcePostingPurpose = "party.test-impact.post")
 {
     var resolvedPaymentId = kind is PartyOpenItems.OpenItemImpactKind.Allocation or
         PartyOpenItems.OpenItemImpactKind.Unallocation
@@ -3301,6 +3620,9 @@ static PartyOpenItems.OpenItemImpactEvent CreateOpenItemEvent(
         dueLineId ?? dueLine.DueScheduleLineId,
         resolvedPaymentId,
         currency ?? dueLine.Currency,
+        sourceType,
+        sourceVersion,
+        sourcePostingPurpose,
         kind,
         amount,
         effectiveDate ?? new DateOnly(2026, 8, 2),

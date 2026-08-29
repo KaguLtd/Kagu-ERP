@@ -76,6 +76,7 @@ foreach (var project in projects.Values)
 
 if (failures.Count == 0)
 {
+    PartySourceChecksumContractCheck.Run();
     await ApiContractCheck.RunAsync();
     Console.WriteLine($"Architecture checks passed for {projects.Count} source projects.");
     return 0;

@@ -55,8 +55,8 @@ public static class PostgresOpenItemSnapshotLoader
         }
 
         const string eventSql = """
-            SELECT event_id, payment_id, impact_kind, amount, effective_date, recorded_at,
-                   reverses_event_id
+            SELECT event_id, source_type, source_version, source_posting_purpose, payment_id,
+                   impact_kind, amount, effective_date, recorded_at, reverses_event_id
             FROM party.open_item_impact_event
             WHERE tenant_id=$1 AND company_id=$2 AND due_schedule_line_id=$3
             ORDER BY effective_date, recorded_at, event_id
@@ -70,12 +70,17 @@ public static class PostgresOpenItemSnapshotLoader
             await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
+                if (reader.IsDBNull(1) || reader.IsDBNull(2) || reader.IsDBNull(3))
+                {
+                    throw new OpenItemImpactPostingIdentityUnavailableException(reader.GetGuid(0));
+                }
                 events.Add(OpenItemImpactEvent.Create(
                     reader.GetGuid(0), scope.TenantId, companyId, dueLine.PartyAccountId,
-                    dueScheduleLineId, ReadNullableGuid(reader, 1), dueLine.Currency,
-                    (OpenItemImpactKind)reader.GetInt16(2), reader.GetDecimal(3),
-                    reader.GetFieldValue<DateOnly>(4), reader.GetFieldValue<DateTimeOffset>(5),
-                    ReadNullableGuid(reader, 6)));
+                    dueScheduleLineId, ReadNullableGuid(reader, 4), dueLine.Currency,
+                    reader.GetString(1), reader.GetInt64(2), reader.GetString(3),
+                    (OpenItemImpactKind)reader.GetInt16(5), reader.GetDecimal(6),
+                    reader.GetFieldValue<DateOnly>(7), reader.GetFieldValue<DateTimeOffset>(8),
+                    ReadNullableGuid(reader, 9)));
             }
         }
 
@@ -84,4 +89,11 @@ public static class PostgresOpenItemSnapshotLoader
 
     private static Guid? ReadNullableGuid(NpgsqlDataReader reader, int ordinal) =>
         reader.IsDBNull(ordinal) ? null : reader.GetGuid(ordinal);
+}
+
+public sealed class OpenItemImpactPostingIdentityUnavailableException(Guid eventId)
+    : InvalidOperationException("The open-item impact predates explicit source posting identity classification.")
+{
+    public string Code { get; } = "OPEN_ITEM_IMPACT_POSTING_IDENTITY_UNAVAILABLE";
+    public Guid EventId { get; } = eventId;
 }

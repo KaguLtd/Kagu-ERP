@@ -37,11 +37,23 @@
   <Folder Name="/src/Modules/Parties/Parties.Domain/">
     <Project Path="src/Modules/Parties/Parties.Domain/KaguERP.Modules.Parties.Domain.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Parties/Parties.Application/">
+    <Project Path="src/Modules/Parties/Parties.Application/KaguERP.Modules.Parties.Application.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Parties/Parties.Contracts/">
+    <Project Path="src/Modules/Parties/Parties.Contracts/KaguERP.Modules.Parties.Contracts.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Parties/Parties.Infrastructure/">
     <Project Path="src/Modules/Parties/Parties.Infrastructure/KaguERP.Modules.Parties.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/src/Modules/Reporting/Reporting.Domain/">
     <Project Path="src/Modules/Reporting/Reporting.Domain/KaguERP.Modules.Reporting.Domain.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Reporting/Reporting.Application/">
+    <Project Path="src/Modules/Reporting/Reporting.Application/KaguERP.Modules.Reporting.Application.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Reporting/Reporting.Infrastructure/">
+    <Project Path="src/Modules/Reporting/Reporting.Infrastructure/KaguERP.Modules.Reporting.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/src/Modules/Treasury/Treasury.Domain/">
     <Project Path="src/Modules/Treasury/Treasury.Domain/KaguERP.Modules.Treasury.Domain.csproj" />

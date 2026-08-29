@@ -184,6 +184,12 @@ Kesin fiş reverse entry ile düzeltilir. Repost yalnız source olay doğru, tü
 
 Posted reversal bağı original ve counter journal'ı tenant/company scope içinde immutable olarak ilişkilendirir. Bir original yalnız bir reversal alabilir; iki bağlantılı yarışta PostgreSQL unique lock tek kazanan üretir. DB guard line number, account, source line, dimensions, functional currency, debit/credit ve currency calculation snapshot'ının exact inverse olduğunu doğrular; reversal chain, update ve delete fail-closed'dur. Bu persistence kanıtı reversal tarihini, correction period'ı, permission/approval veya public command'ı seçmez.
 
+Authoritative posted-source evidence okuması (27 Ağustos 2026): Alt defter ve rapor bileşimleri GL tablolarını doğrudan yorumlamak yerine Accounting'in exact `tenant + company + source type + source event + source version + posting purpose` okumasını kullanabilir. Okuma effective as-of ile recorded cutoff'u ayrı uygular; source `recorded_at` veya `posted_at` kesitten sonraysa görünmez. Aynı kesitte linked ve posted exact reversal etkinleşmişse original journal artık aktif kanıt sayılmaz; reversal kesitten sonraysa geçmiş görünüm değişmez. Birden fazla aktif eşleşme fail-closed conflict üretir. Bu okuma posted olmayan Party opening kaynağına bakiye etkisi vermez ve yeni ticari gerçek/posting oluşturmaz.
+
+Party source composition kanıtı (28 Ağustos 2026): Parties Infrastructure, Accounting Infrastructure'a doğrudan referans vermeden yayımlanmış exact-evidence delegate'i üzerinden aynı connection/transaction içindeki aktif journal kanıtını tüketir. Dönen evidence source type/event/version/purpose ile source effective/recorded tarihlerini birebir karşılamazsa rapor batch'i üretilmez. Böylece rapor adaptörü GL tablosunu yorumlamaz, posting üretmez ve reversal sonrası eski ticari etkiyi yeniden canlandırmaz.
+
+Open-item impact lifecycle kanıtı (28 Ağustos 2026): Exact source okuması artık kaynağı aynı effective-as-of/recorded-cutoff kesitinde `NotPosted`, `Active` veya `Reversed` olarak verir; reversed durumda original posting ile ona bağlı exact reversal journal/link kanıtını birlikte taşır. Parties adapter'ı allocation/write-off ile unallocation/write-off reversal kaynaklarını bu yayımlanmış delegate üzerinden ayrı ayrı doğrular. Counter posting original'dan önceyse veya counter aktifken original Accounting kaynağı aktif değilse çift-ters etkiyi typed conflict ile durdurur; GL tablosunu kendisi yorumlamaz.
+
 ## 15. Kapanış ve zorunlu mali rapor seti
 
 Kapanış sırası:
@@ -197,3 +203,14 @@ Kapanış sırası:
 7. control evidence pack ve ayrı scope lock.
 
 MVP raporları: chart of accounts, journal, GL detail, trial balance, balance sheet, P&L, cash-flow mapping/workpaper, account reconciliation, manual journal, source-to-GL audit trail ve period change report. Her biri comparative dönem, as-of/generation ve source drill-down taşır.
+
+## 16. Kagu Ltd. hesap, manuel kayıt ve kur politikası
+
+- 120 müşteri/alacak ve 320 tedarikçi/borç aileleri sürümlü geliştirme şablonudur. Resmi KKTC chart içeriği ve 123/323 gibi özel varyantlar kod içinde varsayılmaz; chart import + şirket alt hesabı + yetkili mali müşavir kabulüyle yayımlanır.
+- Ortak chart template şirket kurulurken kopyalanabilir. Company kendi alt hesabını açabilir; kullanılan hesap yeniden adlandırılsa bile geçmiş snapshot korunur, hesap silinmez veya kodu başka hesaba verilmez.
+- Kullanıcının elle girdiği satış/alış belgesi `manual journal` değildir; kaynak belge validasyonu ve permission'ı geçince ek insan onayı olmadan posting'e aday olabilir. Otomatik kaynak posting'i de varsayılan ek onay istemez.
+- Kaynaksız/direct GL manual journal ayrı ve kritik sınıftır: gerekçe/source reference, gerekirse ek ve hazırlayandan farklı tek yönetici onayı olmadan post edilemez.
+- Kesinleşmiş journal/belge için hiçbir kullanıcıya yerinde satır değiştirme yetkisi verilmez. “Düzeltme yetkisi” yalnız linked reversal/correction command'ı çalıştırma yetkisidir.
+- Para `numeric(20,4)` saklanır ve iki ondalık gösterilir; kur `numeric(28,12)` saklanır, manuel giriş varsayılan üç ondalık gösterir. Son kullanıcı parasal yuvarlaması `MidpointRounding.AwayFromZero` ve iki hanedir.
+- Yuvarlama residual'ı küçük olduğu için yok sayılmaz. Dengeli journal gerektiğinde sürümlü rounding purpose/control hesabında açık satır üretir; hesap kimliği chart owner kabulü bekler.
+- Farklı raporlama dövizine çevrim, her source event'in effective-date TRY bazlı rate snapshot'ından deterministik yapılır; sonuç yalnız rapor projection'ıdır ve kaynak currency bakiyesini değiştirmez.

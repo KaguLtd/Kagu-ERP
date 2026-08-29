@@ -9,6 +9,8 @@ public sealed record LoadedDueSchedule(
     Guid DueScheduleId,
     string SourceType,
     long SourceVersion,
+    DateOnly SourceEffectiveDate,
+    string SourcePostingPurpose,
     DateTimeOffset RecordedAt,
     ValidatedDueSchedule Schedule);
 
@@ -37,7 +39,8 @@ public static class PostgresDueScheduleLoader
 
         const string headerSql = """
             SELECT party_account_id, source_type, source_event_id, source_version,
-                   currency, source_original_amount, recorded_at
+                   source_effective_date, source_posting_purpose, currency,
+                   source_original_amount, recorded_at
             FROM party.due_schedule
             WHERE tenant_id=$1 AND company_id=$2 AND due_schedule_id=$3
             """;
@@ -45,6 +48,8 @@ public static class PostgresDueScheduleLoader
         string sourceType;
         Guid sourceEventId;
         long sourceVersion;
+        DateOnly sourceEffectiveDate;
+        string sourcePostingPurpose;
         AllocationCurrencyCode currency;
         decimal sourceAmount;
         DateTimeOffset recordedAt;
@@ -62,9 +67,15 @@ public static class PostgresDueScheduleLoader
             sourceType = reader.GetString(1);
             sourceEventId = reader.GetGuid(2);
             sourceVersion = reader.GetInt64(3);
-            currency = AllocationCurrencyCode.Create(reader.GetString(4));
-            sourceAmount = reader.GetDecimal(5);
-            recordedAt = reader.GetFieldValue<DateTimeOffset>(6);
+            if (reader.IsDBNull(4) || reader.IsDBNull(5))
+            {
+                throw new DueSchedulePostingIdentityUnavailableException(dueScheduleId);
+            }
+            sourceEffectiveDate = reader.GetFieldValue<DateOnly>(4);
+            sourcePostingPurpose = reader.GetString(5);
+            currency = AllocationCurrencyCode.Create(reader.GetString(6));
+            sourceAmount = reader.GetDecimal(7);
+            recordedAt = reader.GetFieldValue<DateTimeOffset>(8);
         }
 
         const string linesSql = """
@@ -91,8 +102,15 @@ public static class PostgresDueScheduleLoader
         }
 
         return new LoadedDueSchedule(
-            dueScheduleId, sourceType, sourceVersion, recordedAt,
+            dueScheduleId, sourceType, sourceVersion, sourceEffectiveDate, sourcePostingPurpose, recordedAt,
             ValidatedDueSchedule.Create(
                 scope.TenantId, companyId, partyAccountId, sourceEventId, currency, sourceAmount, lines));
     }
+}
+
+public sealed class DueSchedulePostingIdentityUnavailableException(Guid dueScheduleId)
+    : InvalidOperationException("The due schedule predates explicit source posting identity classification.")
+{
+    public string Code { get; } = "DUE_SCHEDULE_POSTING_IDENTITY_UNAVAILABLE";
+    public Guid DueScheduleId { get; } = dueScheduleId;
 }

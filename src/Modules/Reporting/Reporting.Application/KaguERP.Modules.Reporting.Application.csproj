@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Reporting.Domain\KaguERP.Modules.Reporting.Domain.csproj" />
+    <ProjectReference Include="..\..\Parties\Parties.Contracts\KaguERP.Modules.Parties.Contracts.csproj" />
+  </ItemGroup>
+</Project>

@@ -147,6 +147,8 @@ Her import şunları saklar:
 
 Normalized statement-line persistence kanıtı (26 Ağustos 2026): Canonical external identity, signed amount/currency, booking/value date, raw SHA-256 ve parser version snapshot'ı [append-only PostgreSQL spike'ında](../project/plans/2026-08-26-statement-line-persistence-spike.md) kalıcılaştırıldı. Aynı external identity retry ve iki-connection yarışında tek satır üretir; changed identity payload, cross-company okuma ve runtime UPDATE/DELETE reddedilir. External-key türetimi ve dosya/parser güvenliği bu teknik tablonun değil, sürümlü adapter/import pipeline'ın sorumluluğudur.
 
+Authoritative statement-line loader kanıtı (26 Ağustos 2026): Persisted external identity, signed amount/date ve hash/parser snapshot'ını aynı transaction/company scope içinde Treasury domain modeline yeniden kuran [salt-okunur loader](../project/plans/2026-08-26-authoritative-statement-line-loader-spike.md) gerçek PostgreSQL'de geçti; cross-company ID fail-closed kaldı.
+
 Aynı dosya veya bank transaction tekrarında yeni hareket yaratılmaz. Raw payload mali domain tablosuna doğrudan yazılmaz; normalize mapping lineage taşır.
 
 ## 13. Mutabakat seti ve kontroller
@@ -154,6 +156,10 @@ Aynı dosya veya bank transaction tekrarında yeni hareket yaratılmaz. Raw payl
 ReconciliationSet durumları draft → submitted → approved veya rejected’tır. Öneri skoru yalnız yardımcıdır; yüksek riskli/çoklu eşleşme insan onayı ister. Approver, match önerisini yaratan veya kaynak payment’ı değiştiren kişi olamaz.
 
 Match bir-to-one, one-to-many ve many-to-one olabilir; toplam/tolerans, currency, tarih ve reference açıklanır. Fark; banka masrafı, faiz, kur farkı, chargeback veya suspense event’i olarak ayrı onaylı kaynak olay üretir.
+
+Reconciliation proposal persistence kanıtı (26 Ağustos 2026): Approved sonuç üretmeyen immutable proposal/match snapshot'ı [PostgreSQL spike'ında](../project/plans/2026-08-26-reconciliation-proposal-persistence-spike.md) kalıcılaştırıldı. Deferred guard statement account/currency/direction, satır sayısı ve statement/movement kapasitesini cross-foot eder; owner-tamper kapasite aşımı, changed retry, cross-company okuma ve runtime UPDATE/DELETE reddedildi. Approval ve tolerance politikası seçilmeden bu kayıt `reconciled` sayılmaz.
+
+Authoritative reconciliation proposal loader kanıtı (26 Ağustos 2026): Header, persisted statement ve movement-capacity snapshot'larını aynı transaction/company scope içinde Treasury domain modeline yeniden kuran [salt-okunur loader](../project/plans/2026-08-26-authoritative-reconciliation-proposal-loader-spike.md) gerçek PostgreSQL'de geçti. Cross-company lookup fail-closed; loader approved/reconciled state üretmez.
 
 Kapanış kontrolü:
 

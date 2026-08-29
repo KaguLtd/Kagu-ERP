@@ -181,3 +181,12 @@ Onay quorum’u iki ise iki farklı insan gerekir; aynı kimlik, grup üyeliği 
 Erişim gözden geçirmesi en az üç ayda bir yüksek riskli permission, dormant kullanıcı, geçici rol, break-glass ve scope genişlemelerini raporlar. Kontrol sahibi her bulguyu retain/revoke/exception kararıyla imzalar. Ayrıcalıklı role atama, banka hesabı değişikliği, posting/reopen/repost ve kullanıcı–rol değişikliği kendiliğinden denetim örneklemine girer.
 
 Public API method parametreleri güvenilir sayılmaz; permission kontrolünden sonra kaynak nesne tekrar yüklenir ve state/scope server tarafında doğrulanır. Read model veya export, kaynak endpoint’ten daha geniş yetki veremez.
+
+## 16. Kagu Ltd. permission ve şablon politikası
+
+- `IAM-POL-001`: Business authorization rol adına değil `resource.action` permission, company/alt scope ve koşula göre verilir. Kullanıcı için tek tek seçim ve başka kullanıcıdan kontrollü kopyalama desteklenir.
+- Altı başlangıç şablonu bulunur: `system-company-admin`, `accounting`, `sales`, `purchasing`, `warehouse`, `finance`. Bunlar kolaylık sağlayan seed snapshot'larıdır; yeni permission'ın mevcut kullanıcıya sessiz eklenmesine neden olmaz.
+- Sistem/Şirket Yöneticisi şablonu kimlik, company ve yetki yönetimini bir araya getirebilir; bu, varsayılan olarak mali veri okuma veya journal posting hakkı vermez. İlgili mali permission açıkça atanır.
+- Tutar limitleri veri modelinde tarih etkili bulunur fakat başlangıçta limitsiz/kapalıdır. Bir limit etkinleşirse functional-currency dönüşümü ve kullanılan kur approval snapshot'ına girer.
+- Rapor görüntüleme/export ayrı permission kodlarıdır. Maliyet ve marj en az `inventory.cost.view` ile `reporting.margin.view` üzerinden diğer satış/depo verilerinden ayrı korunur.
+- Genel kritik akış bir yönetici onayı ister; onaylayan hazırlayandan farklı kişidir. Hard-close reopen iki farklı onay gerektiren istisnadır. Kullanıcı, delegation veya admin rolü maker-checker kuralını baypas edemez.

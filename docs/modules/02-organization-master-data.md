@@ -126,3 +126,15 @@ DocumentSequence iki sınıftır:
 Seri politikası company, branch, fiscal year, document type ve gerekirse channel bağlamında tarih etkili sürümlenir. Numara önizlemesi rezervasyon değildir; yalnız kesin issue transaction’ı numara tüketir.
 
 Ana veri değişikliğinde eski belgenin yeniden üretimi için para, UOM, vergi, hesap eşleme, dimension ve party-role snapshot’ı korunur.
+
+## 14. Kagu Ltd. başlangıç şirket politikası
+
+- `ORG-POL-001`: Tenant `Kagu Ltd.` veri sınırıdır. Tenant altında yönetici permission'ı ile birden çok yasal Company açılabilir ve tarih etkili pasifleştirilebilir; Company ayrı defter, dönem ve RLS scope'udur.
+- Şube ilk yayında opsiyoneldir fakat veri modeli ve permission scope'u hazırdır. Şubesiz kullanım otomatik/sahte bir şube üretmez.
+- Birden çok Warehouse açılabilir, pasifleştirilebilir ve depolar arası transfer tek transfer kimliğiyle miktarı koruyan iki hareket üretir. Kullanılmış depo hard-delete edilmez.
+- Project, irsaliye/fatura ve journal satırına snapshot edilen raporlama boyutudur. CostCenter ise bölüm/gider sorumluluğunu izleyen ayrı boyuttur; şirket bazında opsiyonel etkinleştirilir.
+- `ORG-POL-002`: Varsayılan mali yıl 1 Ocak–31 Aralık'tır. Aylık FiscalPeriod kayıtları her zaman bulunur; aylık operasyonel kapanış kullanımı şirket ayarıdır. GL/hard/legal period gate kaydı hiçbir zaman atlanmaz.
+- Soft-close yazımı özel permission ve gerekçe ister. Hard-close reopen, yönetici permission'ına ek olarak iki farklı insanın onayı, gerekçe, sınırlı kapsam/süre ve audit ister.
+- Başlangıç Company functional currency `TRY`; PartyAccount para birimi bunun yerine geçmez. TRY/USD/EUR/GBP desteklenir.
+- `company_effective` kur tipiyle USD/TRY, EUR/TRY ve GBP/TRY oranları günlük manuel girilir. Ek insan onayı yoktur; `exchange-rate.manage`, audit ve immutable version zorunludur. Kullanılmış oran update edilmez.
+- Kur eksikse posting ve çevrimli rapor fail-closed olur; rapor eksik tarih/çift listesini gösterir. Çapraz rapor kuru TRY üzerinden aynı effective date snapshot'larından türetilir.

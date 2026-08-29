@@ -79,9 +79,9 @@ Blokaj etkisi karar bazında ayrıca yazılır:
 | 2 | Resmi/hukuki sınıflandırma | Her soru grubu feature/production etkisi ve güvenli paralel iş sınırı taşır | completed |
 | 3 | Repository sınırı kararı | Bağımsız repository, `main` dalı ve GitHub `origin` doğrulanmıştır | completed |
 | 4 | İsimli sahip ataması | Ürün, teknik, muhasebe, güvenlik/veri ve operasyon sorumluları kayıtlıdır | pending — `DEC-MP01-019` ile geliştirme sonuna ertelendi |
-| 5 | Firma topolojisi ve temel politikalar | Tenant/company/branch/period/currency/approval kararları kanıtlıdır | pending |
-| 6 | Finansal çekirdek politikaları | Hesap planı, allocation, kur/yuvarlama, kilit ve kontrol hesabı kararları onaylıdır | pending |
-| 7 | MP-02 ve MP-03 DoR değerlendirmesi | Her eksik madde owner/date ve açık blokajla raporlanır | in-progress — MP-02 teknik final pass; MP-03 yalnız politika bağımsız spike, business kararları bekliyor |
+| 5 | Firma topolojisi ve temel politikalar | Tenant/company/branch/period/currency/approval kararları kanıtlıdır | completed — `DEC-MP01-001`–`006`, `012` |
+| 6 | Finansal çekirdek politikaları | Hesap planı, allocation, kur/yuvarlama, kilit ve kontrol hesabı kararları onaylıdır | in-progress — `007`–`009` geliştirme için onaylı; banka/transit `010` açık |
+| 7 | MP-02 ve MP-03 DoR değerlendirmesi | Her eksik madde owner/date ve açık blokajla raporlanır | in-progress — MP-02 completed; MP-03 karar-backed dilimler conditional pass |
 
 ## Test planı
 
@@ -100,6 +100,7 @@ Blokaj etkisi karar bazında ayrıca yazılır:
 | 2026-08-19 | Resmi ve finansal kararların çoğu açık | Gerçek vergi/e-Fatura, GL, stok ve production davranışı etkinleşemez | İlgili kurum/uzman/firma sahibi |
 | 2026-08-19 | Teknik temel geri döndürülebilir biçimde kurulabilir | MP-01 cevapları beklerken MP-02'nin sınırlı işleri ilerleyebilir | Master planın paralel ilerleme kuralı |
 | 2026-08-21 | Kullanıcı isimli sahipleri geliştirme sonuna erteledi | MP-01 çıkış kapısı, production ve uzman mali kabulü bloklu kalır | `DEC-MP01-019`; yalnız politika bağımsız ve geri döndürülebilir teknik işler ilerler |
+| 2026-08-27 | Kullanıcı şirket, dönem, para, kur, hesap, cari ve yetki politikalarını belirledi | MP-03 cari/muhasebe dilimleri gerçek ürün politikasıyla ilerleyebilir | `DEC-MP01-001`–`009`, `012`; production uzman/resmi kabulü ayrı |
 
 ## İlerleme günlüğü
 
@@ -127,6 +128,14 @@ Blokaj etkisi karar bazında ayrıca yazılır:
 - MP-02 teknik çıkış kapısı tamamlandı. İsim eksikliği artık MP-02 teknik kapanışını geri açmaz; production ve uzman kabulünü bloklamaya devam eder.
 - MP-03 business implementation için `DEC-MP01-001`–`010` ve `012` blokajları korunurken, decimal ve dengeli journal gibi politika bağımsız invariantları kapsayan teknik spike başlatıldı.
 
+### 2026-08-27
+
+- Kullanıcının tenant/company, şube/depo/proje, takvim yılı, TRY fonksiyonel para, günlük manuel kur, yuvarlama, 120/320 geliştirme şablonu, posting/düzeltme, cari allocation/aging ve granüler permission kararları alındı.
+- Kararlar `DEC-MP01-001`–`009` ve `012` olarak geliştirme için onaylandı; isimli uzman/production kabulü ayrı blokaj olarak korundu.
+- KKTC Vergi Usul Yasası md.114 normal hesap döneminin takvim yılı olduğunu doğruladı; özel dönem Vergi Dairesi kararına bağlıdır.
+- `DEC-MP01-010` banka tetikleyicileri/transit hesapları, `011` stok ve `013` sonrası resmi/production kararları açık kalır.
+- MP-03 DoR, karar-backed cari/muhasebe dilimleri için conditional pass olarak güncellendi.
+
 ## Tamamlanma kanıtı
 
 - [x] Karar kayıt şeması ve başlangıç karar listesi.
@@ -134,7 +143,7 @@ Blokaj etkisi karar bazında ayrıca yazılır:
 - [x] Resmi soru gruplarının faz/feature etkisi.
 - [x] Bağımsız Git repository sınırı ve remote bağlantısı.
 - [ ] İsimli karar sahipleri.
-- [ ] Firma ve finans politikalarının yazılı kanıtı.
+- [x] Firma ve MP-03 cari/muhasebe finans politikalarının yazılı ürün kararı.
 - [ ] MP-02 ve MP-03 Definition of Ready nihai sonucu.
 - [ ] Açık soruların hedef tarihleri.
 - [ ] MP-01 çıkış kapısı değerlendirmesi.

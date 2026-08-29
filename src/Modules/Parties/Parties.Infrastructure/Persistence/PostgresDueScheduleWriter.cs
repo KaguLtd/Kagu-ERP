@@ -1,4 +1,5 @@
 using KaguERP.BuildingBlocks.Application.Security;
+using KaguERP.Modules.Parties.Domain.Accounts;
 using KaguERP.Modules.Parties.Domain.DueSchedules;
 using Npgsql;
 
@@ -7,9 +8,12 @@ namespace KaguERP.Modules.Parties.Infrastructure.Persistence;
 public sealed record DueSchedulePersistenceCommand(
     ExecutionScope Scope,
     Guid PartyId,
+    PartyAccountBalanceSide BalanceSide,
     Guid DueScheduleId,
     string SourceType,
     long SourceVersion,
+    DateOnly SourceEffectiveDate,
+    string SourcePostingPurpose,
     Guid DefaultControlAccountId,
     DateTimeOffset RecordedAt,
     ValidatedDueSchedule Schedule);
@@ -39,9 +43,17 @@ public static class PostgresDueScheduleWriter
         {
             throw new ArgumentException("Party, due schedule and default control-account IDs are required.", nameof(command));
         }
+        if (!Enum.IsDefined(command.BalanceSide))
+        {
+            throw new ArgumentOutOfRangeException(nameof(command), "Party-account balance side is invalid.");
+        }
         if (command.SourceVersion <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(command), "Source version must be positive.");
+        }
+        if (command.SourceEffectiveDate == default)
+        {
+            throw new ArgumentException("Source effective date is required.", nameof(command));
         }
         if (command.RecordedAt.Offset != TimeSpan.Zero)
         {
@@ -52,6 +64,13 @@ public static class PostgresDueScheduleWriter
         {
             throw new ArgumentException("Source type is required and cannot exceed 120 characters.", nameof(command));
         }
+        string sourcePostingPurpose = command.SourcePostingPurpose.Trim();
+        if (sourcePostingPurpose.Length == 0 || sourcePostingPurpose.Length > 120)
+        {
+            throw new ArgumentException(
+                "Source posting purpose is required and cannot exceed 120 characters.",
+                nameof(command));
+        }
 
         ValidatedDueSchedule schedule = command.Schedule;
         command.Scope.EnsureAllowed(schedule.TenantId, schedule.CompanyId);
@@ -60,9 +79,9 @@ public static class PostgresDueScheduleWriter
         const string headerSql = """
             INSERT INTO party.due_schedule
                 (tenant_id, company_id, due_schedule_id, party_account_id, source_type,
-                 source_event_id, source_version, currency, source_original_amount,
-                 recorded_at, recorded_by, line_count)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                 source_event_id, source_version, source_effective_date, source_posting_purpose,
+                 currency, source_original_amount, recorded_at, recorded_by, line_count)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
             ON CONFLICT (tenant_id, company_id, source_type, source_event_id, source_version) DO NOTHING
             RETURNING due_schedule_id, recorded_at
             """;
@@ -75,6 +94,8 @@ public static class PostgresDueScheduleWriter
             header.Parameters.AddWithValue(sourceType);
             header.Parameters.AddWithValue(schedule.SourceEventId);
             header.Parameters.AddWithValue(command.SourceVersion);
+            header.Parameters.AddWithValue(command.SourceEffectiveDate);
+            header.Parameters.AddWithValue(sourcePostingPurpose);
             header.Parameters.AddWithValue(schedule.Currency.Value);
             header.Parameters.AddWithValue(schedule.SourceOriginalAmount);
             header.Parameters.AddWithValue(command.RecordedAt);
@@ -92,7 +113,8 @@ public static class PostgresDueScheduleWriter
         }
 
         const string existingSql = """
-            SELECT due_schedule_id, party_account_id, currency, source_original_amount, line_count, recorded_at
+            SELECT due_schedule_id, party_account_id, currency, source_original_amount, line_count,
+                   recorded_at, source_effective_date, source_posting_purpose
             FROM party.due_schedule
             WHERE tenant_id=$1 AND company_id=$2 AND source_type=$3 AND source_event_id=$4 AND source_version=$5
             """;
@@ -115,7 +137,11 @@ public static class PostgresDueScheduleWriter
             if (existingReader.GetGuid(1) != schedule.PartyAccountId ||
                 !string.Equals(existingReader.GetString(2), schedule.Currency.Value, StringComparison.Ordinal) ||
                 existingReader.GetDecimal(3) != schedule.SourceOriginalAmount ||
-                existingReader.GetInt32(4) != schedule.Lines.Count)
+                existingReader.GetInt32(4) != schedule.Lines.Count ||
+                existingReader.IsDBNull(6) ||
+                existingReader.GetFieldValue<DateOnly>(6) != command.SourceEffectiveDate ||
+                existingReader.IsDBNull(7) ||
+                !string.Equals(existingReader.GetString(7), sourcePostingPurpose, StringComparison.Ordinal))
             {
                 throw new DueSchedulePersistenceConflictException(existingId);
             }
@@ -147,9 +173,11 @@ public static class PostgresDueScheduleWriter
 
         const string accountSql = """
             INSERT INTO party.party_account
-                (tenant_id, company_id, party_account_id, party_id, currency, control_account_id, created_at, created_by)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-            ON CONFLICT (tenant_id, company_id, party_id, currency) DO NOTHING
+                (tenant_id, company_id, party_account_id, party_id, currency, balance_side,
+                 control_account_id, created_at, created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            ON CONFLICT (tenant_id, company_id, party_id, currency, balance_side)
+                WHERE balance_side IS NOT NULL DO NOTHING
             """;
         await using (var accountCommand = new NpgsqlCommand(accountSql, connection, transaction))
         {
@@ -158,6 +186,7 @@ public static class PostgresDueScheduleWriter
             accountCommand.Parameters.AddWithValue(schedule.PartyAccountId);
             accountCommand.Parameters.AddWithValue(command.PartyId);
             accountCommand.Parameters.AddWithValue(schedule.Currency.Value);
+            accountCommand.Parameters.AddWithValue((short)command.BalanceSide);
             accountCommand.Parameters.AddWithValue(command.DefaultControlAccountId);
             accountCommand.Parameters.AddWithValue(command.RecordedAt);
             accountCommand.Parameters.AddWithValue(command.Scope.ActorId);
@@ -165,7 +194,7 @@ public static class PostgresDueScheduleWriter
         }
 
         const string verifySql = """
-            SELECT party_id, currency, control_account_id
+            SELECT party_id, currency, balance_side, control_account_id
             FROM party.party_account
             WHERE tenant_id=$1 AND company_id=$2 AND party_account_id=$3
             """;
@@ -176,7 +205,8 @@ public static class PostgresDueScheduleWriter
         await using NpgsqlDataReader reader = await verify.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken) || reader.GetGuid(0) != command.PartyId ||
             !string.Equals(reader.GetString(1), schedule.Currency.Value, StringComparison.Ordinal) ||
-            reader.GetGuid(2) != command.DefaultControlAccountId)
+            reader.GetInt16(2) != (short)command.BalanceSide ||
+            reader.GetGuid(3) != command.DefaultControlAccountId)
         {
             throw new DueSchedulePartyAccountConflictException(schedule.PartyAccountId);
         }

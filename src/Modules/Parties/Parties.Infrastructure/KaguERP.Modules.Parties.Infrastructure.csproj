@@ -3,6 +3,8 @@
     <PackageReference Include="Npgsql" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Parties.Application\KaguERP.Modules.Parties.Application.csproj" />
+    <ProjectReference Include="..\Parties.Contracts\KaguERP.Modules.Parties.Contracts.csproj" />
     <ProjectReference Include="..\Parties.Domain\KaguERP.Modules.Parties.Domain.csproj" />
     <ProjectReference Include="..\..\..\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
   </ItemGroup>

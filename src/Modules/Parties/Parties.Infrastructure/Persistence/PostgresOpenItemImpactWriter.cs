@@ -29,10 +29,11 @@ public static class PostgresOpenItemImpactWriter
 
         const string insertSql = """
             INSERT INTO party.open_item_impact_event
-                (tenant_id, company_id, event_id, party_account_id, due_schedule_line_id,
-                 payment_id, currency, impact_kind, amount, effective_date, recorded_at,
-                 recorded_by, reverses_event_id)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                (tenant_id, company_id, event_id, source_type, source_version,
+                 source_posting_purpose, party_account_id, due_schedule_line_id, payment_id,
+                 currency, impact_kind, amount, effective_date, recorded_at, recorded_by,
+                 reverses_event_id)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
             ON CONFLICT (tenant_id, company_id, event_id) DO NOTHING
             RETURNING event_id
             """;
@@ -47,8 +48,9 @@ public static class PostgresOpenItemImpactWriter
         }
 
         const string existingSql = """
-            SELECT party_account_id, due_schedule_line_id, payment_id, currency, impact_kind,
-                   amount, effective_date, recorded_at, reverses_event_id
+            SELECT source_type, source_version, source_posting_purpose, party_account_id,
+                   due_schedule_line_id, payment_id, currency, impact_kind, amount,
+                   effective_date, recorded_at, reverses_event_id
             FROM party.open_item_impact_event
             WHERE tenant_id=$1 AND company_id=$2 AND event_id=$3
             """;
@@ -61,13 +63,16 @@ public static class PostgresOpenItemImpactWriter
         {
             throw new InvalidOperationException("Open-item impact is not visible after its identity conflict.");
         }
-        if (reader.GetGuid(0) != impact.PartyAccountId || reader.GetGuid(1) != impact.DueScheduleLineId ||
-            ReadNullableGuid(reader, 2) != impact.PaymentId ||
-            !string.Equals(reader.GetString(3), impact.Currency.Value, StringComparison.Ordinal) ||
-            reader.GetInt16(4) != (short)impact.Kind || reader.GetDecimal(5) != impact.Amount ||
-            reader.GetFieldValue<DateOnly>(6) != impact.EffectiveDate ||
-            reader.GetFieldValue<DateTimeOffset>(7) != impact.RecordedAt ||
-            ReadNullableGuid(reader, 8) != impact.ReversesEventId)
+        if (!string.Equals(reader.GetString(0), impact.SourceType, StringComparison.Ordinal) ||
+            reader.GetInt64(1) != impact.SourceVersion ||
+            !string.Equals(reader.GetString(2), impact.SourcePostingPurpose, StringComparison.Ordinal) ||
+            reader.GetGuid(3) != impact.PartyAccountId || reader.GetGuid(4) != impact.DueScheduleLineId ||
+            ReadNullableGuid(reader, 5) != impact.PaymentId ||
+            !string.Equals(reader.GetString(6), impact.Currency.Value, StringComparison.Ordinal) ||
+            reader.GetInt16(7) != (short)impact.Kind || reader.GetDecimal(8) != impact.Amount ||
+            reader.GetFieldValue<DateOnly>(9) != impact.EffectiveDate ||
+            reader.GetFieldValue<DateTimeOffset>(10) != impact.RecordedAt ||
+            ReadNullableGuid(reader, 11) != impact.ReversesEventId)
         {
             throw new OpenItemImpactPersistenceConflictException(impact.EventId);
         }
@@ -112,6 +117,9 @@ public static class PostgresOpenItemImpactWriter
         command.Parameters.AddWithValue(impact.TenantId);
         command.Parameters.AddWithValue(impact.CompanyId);
         command.Parameters.AddWithValue(impact.EventId);
+        command.Parameters.AddWithValue(impact.SourceType);
+        command.Parameters.AddWithValue(impact.SourceVersion);
+        command.Parameters.AddWithValue(impact.SourcePostingPurpose);
         command.Parameters.AddWithValue(impact.PartyAccountId);
         command.Parameters.AddWithValue(impact.DueScheduleLineId);
         command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Uuid, Value = impact.PaymentId.HasValue ? impact.PaymentId.Value : DBNull.Value });
