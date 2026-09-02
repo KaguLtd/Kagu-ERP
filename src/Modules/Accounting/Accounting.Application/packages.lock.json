@@ -17,6 +17,9 @@
       },
       "kaguerp.modules.accounting.domain": {
         "type": "Project"
+      },
+      "kaguerp.modules.treasury.contracts": {
+        "type": "Project"
       }
     }
   }

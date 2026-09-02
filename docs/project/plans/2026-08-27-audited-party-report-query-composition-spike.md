@@ -27,3 +27,4 @@ Reporting platform audit tablosuna doğrudan yazmaz; caller ortak transaction-bo
 - Zorlanmış appender hatasında authoritative rapor yüklenmiş olsa bile sonuç caller'a dönmedi.
 - Uygulama rolüne audit `SELECT` hakkı verilmedi; mevcut schema-owner audit persistence test sınırı korundu.
 - Gerçek PostgreSQL integration, solution build, domain/architecture ve format kapıları geçti.
+- Production follow-up, bu appender portunu `party.account.detail` version `1` ve `reporting.party-account.view` sözleşmesiyle transaction-owning adapter/endpoint'e bağladı; allowed, denied ve not-found commit kanıtı [production query planında](2026-08-29-party-report-api-query.md) tamamlandı.

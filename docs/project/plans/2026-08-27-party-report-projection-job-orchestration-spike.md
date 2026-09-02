@@ -19,8 +19,11 @@ Job scheduler, PostgreSQL transaction, firma aging policy seçimi, source adapte
 - Geçerli fixture sink'e tam bir kez ulaştı.
 - Farklı company isteyen query'ye dönen source batch `PARTY_REPORT_SOURCE_SCOPE_MISMATCH` ile zero-publish reddedildi.
 - Başka control-account kimliği taşıyan balance evidence `PARTY_CONTROL_ACCOUNT_EVIDENCE_MISMATCH` ile zero-publish reddedildi.
+- 29 Ağustos güncellemesinde control-account portu exact `PartyReportSourceBatch` bağlamını zorunlu aldı; source lineage GL kanıtına kadar taşındı.
+- Aynı scope/slice içinde sıfır olmayan subledger−GL farkı `PARTY_CONTROL_ACCOUNT_RECONCILIATION_DIFFERENCE` ile zero-publish reddedildi.
+- Gerçek PostgreSQL `75 GBP` due kaynağı job ve atomic sink üzerinden persisted statement/aging/control-account setine taşındı; tam command replay'i `Created=false` kaldı.
 - Release solution build 0 warning/0 error; architecture/application contract hostu 19 source project için geçti.
 
 ## Açık işler
 
-Gerçek Parties adapter'ı balance-side ve opening kanıtı şemada olmadığı için blokeli kalır. Aging policy ve Accounting/Parties control-balance port adapter'ları, PostgreSQL atomic sink adapter'ı ve Worker scheduling sonraki teknik dilimlerdir. Production permission code ve kullanıcı sahipleri `atanmadı` olarak kalır.
+Gerçek Parties adapter'ı, PostgreSQL atomic sink, Accounting exact-lineage control-balance bileşimi, effective/recorded kesimli authoritative aging-policy seçimi ve production permission/API tamamlandı. Worker scheduling için hangi service identity'nin hangi company scope ile çalışacağı ve iptal edilmiş kullanıcı yetkisinden bağımsız otorite sınırı henüz belirlenmedi; kullanıcı hesabı sessizce taklit edilmedi. Opening event'in due-date/open-item semantiği de açık kalır. Kullanıcı sahipleri `atanmadı` olarak kalır.

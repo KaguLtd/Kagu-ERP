@@ -33,7 +33,9 @@ public static class AuditedPartyReportQuery
         {
             throw new ArgumentException("Required report permission code is required.", nameof(request));
         }
-        bool permitted = request.Query.Scope.HasPermission(
+        bool companyAllowed = request.Query.Scope.Allows(
+            request.Query.Scope.TenantId, request.Query.CompanyId);
+        bool permitted = companyAllowed && request.Query.Scope.HasPermission(
             request.Query.CompanyId, request.Query.RequiredPermissionCode.Trim());
         if (!permitted)
         {
@@ -59,8 +61,7 @@ public static class AuditedPartyReportQuery
     {
         if (request.AuditEventId == Guid.Empty || request.AuditContext.TenantId != request.Query.Scope.TenantId ||
             request.AuditContext.ActorId != request.Query.Scope.ActorId ||
-            !request.AuditContext.CompanyIds.SetEquals(request.Query.Scope.CompanyIds) ||
-            !request.AuditContext.CompanyIds.Contains(request.Query.CompanyId))
+            !request.AuditContext.CompanyIds.SetEquals(request.Query.Scope.CompanyIds))
         {
             throw new ArgumentException("Party report audit context must match the trusted execution scope.", nameof(request));
         }

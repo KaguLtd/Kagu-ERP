@@ -84,7 +84,8 @@ public sealed class PostgresPartyReportProjectionSink(
 }
 
 public sealed class PartyReportProjectionSinkException()
-    : InvalidOperationException("The publication context does not match its Party source and job command.")
+    : InvalidOperationException("The publication context does not match its Party source and job command."),
+      IPartyReportRefreshFailure
 {
     public string Code { get; } = "PARTY_REPORT_PUBLICATION_CONTEXT_MISMATCH";
 }

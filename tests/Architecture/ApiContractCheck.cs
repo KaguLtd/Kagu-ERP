@@ -1,9 +1,11 @@
 using System.Security.Claims;
 using System.Text.Json;
 using KaguERP.Api.Observability;
+using KaguERP.Api.Reports;
 using KaguERP.Api.Security;
 using KaguERP.BuildingBlocks.Application.Observability;
 using KaguERP.BuildingBlocks.Application.Security;
+using KaguERP.Modules.Reporting.Application.PartyReports;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Patterns;
@@ -23,6 +25,7 @@ internal static class ApiContractCheck
         await AssertMissingApplicationScopeIsRejectedAsync();
         await AssertTrustedApplicationScopeContinuesAsync();
         AssertCrossScopeResourceIsRejected();
+        AssertPartyReportQueryContract();
 
         Console.WriteLine("API application-scope, correlation and safe telemetry contract checks passed.");
     }
@@ -202,6 +205,25 @@ internal static class ApiContractCheck
         catch (ExecutionScopeDeniedException)
         {
         }
+    }
+
+    private static void AssertPartyReportQueryContract()
+    {
+        Assert(PartyReportQueryEndpoint.Route == "/api/v1/reports/{code}/queries",
+            "Party report query route changed unexpectedly.");
+        Assert(PartyAccountDetailReportDefinition.ReportCode == "party.account.detail" &&
+               PartyAccountDetailReportDefinition.Version == 1 &&
+               PartyAccountDetailReportDefinition.ViewPermission == "reporting.party-account.view",
+            "Production Party report definition or permission contract changed unexpectedly.");
+        Assert(PartyReportQueryEndpoint.IsValidRequest(new PartyReportQueryApiRequest(
+                Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7())),
+            "Valid Party report API request was rejected.");
+        Assert(!PartyReportQueryEndpoint.IsValidRequest(new PartyReportQueryApiRequest(
+                Guid.Empty, Guid.CreateVersion7(), Guid.CreateVersion7())),
+            "Party report API accepted an empty company ID.");
+        Assert(PartyReportQueryEndpoint.FormatAmount(1234.5m) == "1234.5000" &&
+               PartyReportQueryEndpoint.FormatAmount(-0.125m) == "-0.1250",
+            "Party report monetary JSON contract is not an invariant four-decimal string.");
     }
 
     private static DefaultHttpContext CreateContext(bool authenticated)

@@ -18,6 +18,18 @@ Test piramidi tek başına yeterli model değildir. Her gereksinim şu kanıt t�
 
 Başarısız veya atlanmış test “yeşil” sayılmaz. Zorunlu istisna; sahibi, riski, telafisi ve son kullanma tarihi olan yazılı karardır.
 
+### 2.1 Geliştirme kadansı — dar dilim ve MP sonu regresyon
+
+`TEST-POL-001` / `DEC-MP01-024` uyarınca test sıklığı risk ve master fazı kapısına göre iki seviyelidir:
+
+- Dikey dilimde yalnız değişen davranışın domain/property testi, gerekiyorsa gerçek PostgreSQL constraint/RLS/concurrency testi ve ilgili compile/static kapı çalışır. Finansal veya authorization invariantı sonraki MP sonuna kadar tamamen testsiz bırakılmaz.
+- Her oturumda solution-wide build, bütün DB harness'i, restore, web, Android ve bütün golden paket tekrarlanmaz.
+- İlgili MP `validating` durumuna girerken full locked restore, solution build/format, tüm unit/integration, gerçek PostgreSQL/RLS/concurrency, boş+mevcut DB migration, restore, golden cross-foot, web/Android ve güvenlik taramaları tek birleşik kapanış paketi olarak çalışır.
+- Kapanış paketindeki bulgular aynı MP içinde düzeltilir ve etkilenen dar testten sonra bütün kapanış paketi yeniden çalıştırılır. MP ancak son birleşik koşu yeşilken `completed` olabilir.
+- Ortam engeli veya ertelenen test açık risk, neden ve tekrar koşu tetikleyicisiyle görev planında kalır; başarı sayılmaz.
+
+Console tabanlı domain unit harness, MP içindeki dar koşular için bir veya daha fazla test-adı filtresi kabul eder (örnek: `dotnet run --project tests/Unit/KaguERP.DomainUnitChecks.csproj -- "opening"`). Filtresiz çağrı bütün unit paketini çalıştırır ve MP kapanış davranışıdır.
+
 ## 3. Test katmanları
 
 ### 3.1 Domain unit ve property testleri

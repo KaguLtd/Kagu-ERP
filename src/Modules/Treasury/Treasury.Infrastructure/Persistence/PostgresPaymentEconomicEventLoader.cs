@@ -32,6 +32,8 @@ public static class PostgresPaymentEconomicEventLoader
                    transaction_currency,functional_currency,effective_date,recorded_at,source_type,
                    source_event_id,posting_purpose,rate_snapshot_id,rate_version,rate_type,rate_source,
                    rate_date,functional_units_numerator,transaction_units_denominator
+                   ,rounding_policy_id,rounding_policy_version,rounding_scale,rounding_mode,
+                   unrounded_functional_amount,rounding_difference
             FROM treasury.payment_economic_event
             WHERE tenant_id=$1 AND company_id=$2 AND payment_id=$3
             """;
@@ -47,7 +49,7 @@ public static class PostgresPaymentEconomicEventLoader
 
         var transactionCurrency = TreasuryCurrencyCode.Create(reader.GetString(5));
         var functionalCurrency = TreasuryCurrencyCode.Create(reader.GetString(6));
-        SameCurrencyPaymentRateSnapshot rate = SameCurrencyPaymentRateSnapshot.Create(
+        PaymentRateSnapshot rate = PaymentRateSnapshot.Create(
             scope.TenantId,
             companyId,
             reader.GetGuid(12),
@@ -58,8 +60,17 @@ public static class PostgresPaymentEconomicEventLoader
             reader.GetString(15),
             reader.GetFieldValue<DateOnly>(16),
             reader.GetDecimal(17),
-            reader.GetDecimal(18));
-        return ValidatedPaymentEconomicEventDraft.Create(
+            reader.GetDecimal(18),
+            reader.GetGuid(19),
+            reader.GetInt64(20),
+            reader.GetInt16(21));
+        if (reader.GetInt16(22) != 2)
+        {
+            throw new PaymentEconomicEventPersistenceException(
+                "PAYMENT_ROUNDING_MODE_UNSUPPORTED",
+                "Persisted payment rounding mode is not AwayFromZero.");
+        }
+        ValidatedPaymentEconomicEventDraft payment = ValidatedPaymentEconomicEventDraft.Create(
             paymentId,
             scope.TenantId,
             companyId,
@@ -74,5 +85,19 @@ public static class PostgresPaymentEconomicEventLoader
             reader.GetGuid(10),
             reader.GetString(11),
             rate);
+        if (reader.GetDecimal(23) != payment.UnroundedFunctionalAmount ||
+            reader.GetDecimal(24) != payment.RoundingDifference)
+        {
+            throw new PaymentEconomicEventPersistenceException(
+                "PAYMENT_CONVERSION_EVIDENCE_MISMATCH",
+                "Persisted payment conversion evidence cannot be reproduced from its rate and rounding snapshot.");
+        }
+        return payment;
     }
+}
+
+public sealed class PaymentEconomicEventPersistenceException(string code, string message)
+    : InvalidOperationException(message)
+{
+    public string Code { get; } = code;
 }

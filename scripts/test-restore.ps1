@@ -29,6 +29,7 @@ if ($restoreDatabase -notmatch '^kagu_erp_restore_[0-9a-f]{32}$') {
 }
 
 $previousDatabase = [Environment]::GetEnvironmentVariable('KAGU_ERP_POSTGRES_DB')
+$env:KAGU_ERP_POSTGRES_DB = $sourceDatabase
 $restoreCreated = $false
 try {
     docker compose exec -T erp-db pg_dump --username $ownerUser --dbname $sourceDatabase `

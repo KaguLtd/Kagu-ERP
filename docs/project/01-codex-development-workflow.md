@@ -65,7 +65,7 @@ içerir. Plan kodla birlikte güncellenir; yalnız başlangıç niyeti değildir
 2. **Modelle:** invariant, state machine, yetki ve transaction sınırı.
 3. **Planla:** en küçük dikey dilim ve acceptance.
 4. **Uygula:** domain'den dışa doğru; gereksiz altyapı ekleme.
-5. **Test et:** önce hedef test, sonra ilgili paket; gerçek PostgreSQL gereken yerde.
+5. **Test et:** önce değişen riskin dar hedef testi; tam repository/DB/restore/client regresyonunu `DEC-MP01-024` uyarınca MP validating/kapanış paketinde çalıştır.
 6. **İncele:** diff, secret/PII, tenant scope, mali/audit/outbox etkisi.
 7. **Doğrula:** API/OpenAPI, migration, web/mobil ve operasyon smoke.
 8. **Belgele:** gereksinim, ADR, runbook ve plan durumu.

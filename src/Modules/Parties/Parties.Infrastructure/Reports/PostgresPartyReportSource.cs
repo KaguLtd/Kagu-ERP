@@ -139,7 +139,16 @@ public sealed class PostgresPartyReportSource(
             openingExposure,
             watermarkFrom,
             watermarkTo,
-            openItems);
+            openItems,
+            activeEvidence.Select(item => new PartyReportPostingLineageFact(
+                item.JournalId,
+                item.SourceType,
+                item.SourceEventId,
+                item.SourceVersion,
+                item.PostingPurpose,
+                item.EffectiveDate,
+                item.RecordedAt,
+                item.PostedAt)));
         await transaction.CommitAsync(cancellationToken);
         return result;
     }
@@ -158,6 +167,14 @@ public sealed class PostgresPartyReportSource(
             FROM party.party_account_opening_event
             WHERE tenant_id=$1 AND company_id=$2 AND party_account_id=$3
               AND effective_date <= $4 AND recorded_at <= $5
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM party.due_schedule schedule
+                  WHERE schedule.tenant_id=party_account_opening_event.tenant_id
+                    AND schedule.company_id=party_account_opening_event.company_id
+                    AND schedule.source_type=$6
+                    AND schedule.source_event_id=party_account_opening_event.opening_event_id
+                    AND schedule.source_version=party_account_opening_event.source_version)
             ORDER BY effective_date, recorded_at, opening_event_id
             """;
         var candidates = new List<OpeningCandidate>();
@@ -168,6 +185,7 @@ public sealed class PostgresPartyReportSource(
             command.Parameters.AddWithValue(query.PartyAccountId);
             command.Parameters.AddWithValue(query.EffectiveAsOf);
             command.Parameters.AddWithValue(query.RecordedCutoff);
+            command.Parameters.AddWithValue(PartyAccountOpeningDraft.SourceType);
             await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {

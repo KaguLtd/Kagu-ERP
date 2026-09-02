@@ -7,6 +7,8 @@ namespace KaguERP.Modules.Reporting.Infrastructure.Persistence;
 public sealed record AuthorizedPartyReportQueryRequest(
     ExecutionScope Scope,
     Guid CompanyId,
+    string ExpectedReportCode,
+    long ExpectedReportDefinitionVersion,
     string RequiredPermissionCode,
     Guid CrossFootId,
     Guid StatementId,
@@ -14,7 +16,7 @@ public sealed record AuthorizedPartyReportQueryRequest(
 
 public static class AuthorizedPartyReportQuery
 {
-    public static ValueTask<PartyStatementAgingCrossFoot?> ExecuteAsync(
+    public static async ValueTask<PartyStatementAgingCrossFoot?> ExecuteAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         AuthorizedPartyReportQueryRequest request,
@@ -24,6 +26,12 @@ public static class AuthorizedPartyReportQuery
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(request);
         request.Scope.EnsureAllowed(request.Scope.TenantId, request.CompanyId);
+        string reportCode = request.ExpectedReportCode?.Trim()
+            ?? throw new ArgumentException("Expected report code is required.", nameof(request));
+        if (reportCode.Length == 0 || request.ExpectedReportDefinitionVersion <= 0)
+        {
+            throw new ArgumentException("Expected report code and definition version are required.", nameof(request));
+        }
         string permissionCode = request.RequiredPermissionCode?.Trim()
             ?? throw new ArgumentException("Required report permission code is required.", nameof(request));
         if (permissionCode.Length == 0)
@@ -34,9 +42,18 @@ public static class AuthorizedPartyReportQuery
         {
             throw new PartyReportQueryDeniedException();
         }
-        return PostgresPartyReportCrossFootLoader.LoadAsync(
+        PartyStatementAgingCrossFoot? result = await PostgresPartyReportCrossFootLoader.LoadAsync(
             connection, transaction, request.Scope, request.CompanyId, request.CrossFootId,
             request.StatementId, request.AgingReportId, cancellationToken);
+        if (result is null)
+        {
+            return null;
+        }
+        var slice = result.Statement.ReportSlice;
+        return string.Equals(slice.ReportCode, reportCode, StringComparison.Ordinal) &&
+               slice.ReportDefinitionVersion == request.ExpectedReportDefinitionVersion
+            ? result
+            : null;
     }
 }
 

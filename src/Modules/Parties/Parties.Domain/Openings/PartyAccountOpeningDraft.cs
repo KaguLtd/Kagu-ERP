@@ -15,7 +15,9 @@ public sealed record PartyAccountOpeningDraft
         PartyAccountOpeningEntrySide entrySide,
         decimal originalAmount,
         DateOnly effectiveDate,
-        DateTimeOffset recordedAt)
+        DateTimeOffset recordedAt,
+        Guid dueScheduleId,
+        IReadOnlyList<PartyAccountOpeningDueLineDraft> dueLines)
     {
         TenantId = tenantId;
         CompanyId = companyId;
@@ -25,6 +27,8 @@ public sealed record PartyAccountOpeningDraft
         OriginalAmount = originalAmount;
         EffectiveDate = effectiveDate;
         RecordedAt = recordedAt;
+        DueScheduleId = dueScheduleId;
+        DueLines = dueLines;
         SourceVersion = InitialSourceVersion;
     }
 
@@ -46,6 +50,10 @@ public sealed record PartyAccountOpeningDraft
 
     public DateTimeOffset RecordedAt { get; }
 
+    public Guid DueScheduleId { get; }
+
+    public IReadOnlyList<PartyAccountOpeningDueLineDraft> DueLines { get; }
+
     public static PartyAccountOpeningDraft Create(
         Guid tenantId,
         Guid companyId,
@@ -54,12 +62,15 @@ public sealed record PartyAccountOpeningDraft
         PartyAccountOpeningEntrySide entrySide,
         decimal originalAmount,
         DateOnly effectiveDate,
-        DateTimeOffset recordedAt)
+        DateTimeOffset recordedAt,
+        Guid dueScheduleId,
+        IEnumerable<PartyAccountOpeningDueLineDraft?>? dueLines)
     {
         RequireId(tenantId, "PARTY_OPENING_TENANT_REQUIRED", "Opening-balance tenant ID is required.");
         RequireId(companyId, "PARTY_OPENING_COMPANY_REQUIRED", "Opening-balance company ID is required.");
         RequireId(openingEventId, "PARTY_OPENING_EVENT_REQUIRED", "Opening-balance event ID is required.");
         RequireId(partyAccountId, "PARTY_OPENING_ACCOUNT_REQUIRED", "Opening-balance party-account ID is required.");
+        RequireId(dueScheduleId, "PARTY_OPENING_DUE_SCHEDULE_REQUIRED", "Opening-balance due-schedule ID is required.");
 
         if (!Enum.IsDefined(entrySide))
         {
@@ -96,6 +107,64 @@ public sealed record PartyAccountOpeningDraft
                 "Opening-balance recorded timestamp must use the UTC offset.");
         }
 
+        if (dueLines is null)
+        {
+            throw new PartyAccountOpeningInvariantException(
+                "PARTY_OPENING_DUE_LINES_REQUIRED",
+                "Opening-balance due lines are required.");
+        }
+        PartyAccountOpeningDueLineDraft?[] copiedLines = dueLines.ToArray();
+        if (copiedLines.Length == 0)
+        {
+            throw new PartyAccountOpeningInvariantException(
+                "PARTY_OPENING_DUE_LINES_REQUIRED",
+                "Opening-balance due lines are required.");
+        }
+        if (copiedLines.Any(line => line is null))
+        {
+            throw new PartyAccountOpeningInvariantException(
+                "PARTY_OPENING_DUE_LINE_REQUIRED",
+                "Opening-balance due lines cannot contain null values.");
+        }
+
+        PartyAccountOpeningDueLineDraft[] validatedLines = copiedLines
+            .Cast<PartyAccountOpeningDueLineDraft>()
+            .ToArray();
+        if (validatedLines.Select(line => line.DueScheduleLineId).Distinct().Count() != validatedLines.Length)
+        {
+            throw new PartyAccountOpeningInvariantException(
+                "PARTY_OPENING_DUE_LINE_DUPLICATE",
+                "An opening-balance due line can occur only once.");
+        }
+
+        decimal dueTotal;
+        try
+        {
+            dueTotal = validatedLines.Sum(line => line.OriginalAmount);
+        }
+        catch (OverflowException exception)
+        {
+            throw new PartyAccountOpeningInvariantException(
+                "PARTY_OPENING_DUE_TOTAL_OVERFLOW",
+                "Opening-balance due-line total exceeded decimal range.",
+                exception);
+        }
+        if (dueTotal != originalAmount)
+        {
+            throw new PartyAccountOpeningInvariantException(
+                "PARTY_OPENING_DUE_TOTAL_MISMATCH",
+                "Opening-balance due-line total must equal the source amount exactly.");
+        }
+        Array.Sort(
+            validatedLines,
+            (left, right) =>
+            {
+                int dateComparison = left.DueDate.CompareTo(right.DueDate);
+                return dateComparison != 0
+                    ? dateComparison
+                    : left.DueScheduleLineId.CompareTo(right.DueScheduleLineId);
+            });
+
         return new PartyAccountOpeningDraft(
             tenantId,
             companyId,
@@ -104,7 +173,9 @@ public sealed record PartyAccountOpeningDraft
             entrySide,
             originalAmount,
             effectiveDate,
-            recordedAt);
+            recordedAt,
+            dueScheduleId,
+            Array.AsReadOnly(validatedLines));
     }
 
     private static int GetScale(decimal value) =>
@@ -119,8 +190,13 @@ public sealed record PartyAccountOpeningDraft
     }
 }
 
-public sealed class PartyAccountOpeningInvariantException(string code, string message)
-    : InvalidOperationException(message)
+public sealed class PartyAccountOpeningInvariantException : InvalidOperationException
 {
-    public string Code { get; } = code;
+    public PartyAccountOpeningInvariantException(string code, string message)
+        : base(message) => Code = code;
+
+    public PartyAccountOpeningInvariantException(string code, string message, Exception innerException)
+        : base(message, innerException) => Code = code;
+
+    public string Code { get; }
 }

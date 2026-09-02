@@ -66,15 +66,17 @@ public static class PostgresJournalPreparationOrchestrator
                 "The canonical source version does not match the expected source version.");
         }
 
+        KaguERP.BuildingBlocks.Application.Approvals.ApprovalSubjectReference approvalSubject =
+            command.ResolveApprovalSubject();
         _ = await PostgresAuthoritativeApprovalCompletionLoader.LoadAsync(
             connection,
             transaction,
             command.Scope,
-            command.SourceIdentity.TenantId,
-            command.SourceIdentity.CompanyId,
-            command.SourceIdentity.SourceType,
-            command.SourceIdentity.SourceEventId,
-            command.ExpectedSourceVersion,
+            approvalSubject.TenantId,
+            approvalSubject.CompanyId,
+            approvalSubject.SubjectType,
+            approvalSubject.SubjectId,
+            approvalSubject.SubjectVersion,
             cancellationToken);
 
         var request = new JournalPreparationRequest(

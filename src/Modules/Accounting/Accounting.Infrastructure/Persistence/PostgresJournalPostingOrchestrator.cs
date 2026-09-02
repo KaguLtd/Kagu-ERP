@@ -73,18 +73,19 @@ public static class PostgresJournalPostingOrchestrator
         CanonicalJournalPreparationSource source = canonicalSource
             ?? throw new InvalidOperationException("Canonical source was not captured during preparation.");
 
+        ApprovalSubjectReference approvalSubject = command.Preparation.ResolveApprovalSubject();
         ApprovalCompletionEvidence approval = await PostgresAuthoritativeApprovalCompletionLoader.LoadAsync(
             connection, transaction, command.Preparation.Scope,
-            command.Preparation.SourceIdentity.TenantId, command.Preparation.SourceIdentity.CompanyId,
-            command.Preparation.SourceIdentity.SourceType, command.Preparation.SourceIdentity.SourceEventId,
-            command.Preparation.ExpectedSourceVersion, cancellationToken);
+            approvalSubject.TenantId, approvalSubject.CompanyId, approvalSubject.SubjectType,
+            approvalSubject.SubjectId, approvalSubject.SubjectVersion, cancellationToken);
         ValidatedPeriodLockSet periodLocks = await PostgresAuthoritativePeriodGateLoader.LoadForStandardPostingAsync(
             connection, transaction, command.Preparation.Scope, source.Draft, cancellationToken);
         var persistedDraft = new ValidatedJournalDraftPersistenceResult(
             preparationResult.JournalDraftId, preparationResult.DraftCreated, preparationResult.DraftHash);
         PostedJournalPersistenceResult posted = await PostgresPostedJournalWriter.PersistAsync(
             connection, transaction, command.Preparation.Scope, command.JournalId, persistedDraft, source.Draft,
-            command.Preparation.ExpectedSourceVersion, approval, periodLocks, command.PostedAt, cancellationToken);
+            command.Preparation.ExpectedSourceVersion, approval, approvalSubject, periodLocks,
+            command.PostedAt, cancellationToken);
         var result = new JournalPostingResult(preparationResult, posted);
 
         await appendPostedAudit(connection, transaction, command, result, cancellationToken);

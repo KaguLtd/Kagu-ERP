@@ -1,3 +1,4 @@
+using KaguERP.BuildingBlocks.Application.Approvals;
 using KaguERP.BuildingBlocks.Application.Audit;
 using KaguERP.BuildingBlocks.Application.Security;
 using KaguERP.Modules.Accounting.Domain.Journals;
@@ -30,7 +31,26 @@ public sealed record JournalPreparationCommand(
     Guid ReservationId,
     Guid JournalDraftId,
     Guid AuditEventId,
-    Guid OutboxEventId);
+    Guid OutboxEventId,
+    ApprovalSubjectReference? ApprovalSubject = null)
+{
+    public ApprovalSubjectReference ResolveApprovalSubject()
+    {
+        ApprovalSubjectReference resolved = ApprovalSubject ?? ApprovalSubjectReference.Create(
+            SourceIdentity.TenantId,
+            SourceIdentity.CompanyId,
+            SourceIdentity.SourceType,
+            SourceIdentity.SourceEventId,
+            ExpectedSourceVersion);
+        if (resolved.TenantId != SourceIdentity.TenantId || resolved.CompanyId != SourceIdentity.CompanyId)
+        {
+            throw new ApprovalEvidenceException(
+                "APPROVAL_SUBJECT_JOURNAL_SCOPE_MISMATCH",
+                "Journal source and approval subject must remain in the same tenant and company.");
+        }
+        return resolved;
+    }
+}
 
 public sealed record CanonicalJournalPreparationSource(
     ValidatedJournalDraft Draft,

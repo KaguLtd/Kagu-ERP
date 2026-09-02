@@ -7,5 +7,12 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
+    <ProjectReference Include="..\Modules\Reporting\Reporting.Application\KaguERP.Modules.Reporting.Application.csproj" />
+    <ProjectReference Include="..\Modules\Reporting\Reporting.Infrastructure\KaguERP.Modules.Reporting.Infrastructure.csproj" />
+    <ProjectReference Include="..\Modules\Parties\Parties.Infrastructure\KaguERP.Modules.Parties.Infrastructure.csproj" />
+    <ProjectReference Include="..\Modules\Accounting\Accounting.Infrastructure\KaguERP.Modules.Accounting.Infrastructure.csproj" />
+    <ProjectReference Include="..\Modules\Treasury\Treasury.Application\KaguERP.Modules.Treasury.Application.csproj" />
+    <ProjectReference Include="..\Modules\Treasury\Treasury.Contracts\KaguERP.Modules.Treasury.Contracts.csproj" />
+    <ProjectReference Include="..\Modules\Treasury\Treasury.Infrastructure\KaguERP.Modules.Treasury.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

@@ -2,5 +2,6 @@
   <ItemGroup>
     <ProjectReference Include="..\Accounting.Domain\KaguERP.Modules.Accounting.Domain.csproj" />
     <ProjectReference Include="..\..\..\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
+    <ProjectReference Include="..\..\Treasury\Treasury.Contracts\KaguERP.Modules.Treasury.Contracts.csproj" />
   </ItemGroup>
 </Project>

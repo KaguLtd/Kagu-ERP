@@ -34,6 +34,9 @@
   <Folder Name="/src/Modules/Accounting/Accounting.Infrastructure/">
     <Project Path="src/Modules/Accounting/Accounting.Infrastructure/KaguERP.Modules.Accounting.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Inventory/Inventory.Domain/">
+    <Project Path="src/Modules/Inventory/Inventory.Domain/KaguERP.Modules.Inventory.Domain.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Parties/Parties.Domain/">
     <Project Path="src/Modules/Parties/Parties.Domain/KaguERP.Modules.Parties.Domain.csproj" />
   </Folder>
@@ -57,6 +60,12 @@
   </Folder>
   <Folder Name="/src/Modules/Treasury/Treasury.Domain/">
     <Project Path="src/Modules/Treasury/Treasury.Domain/KaguERP.Modules.Treasury.Domain.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Treasury/Treasury.Application/">
+    <Project Path="src/Modules/Treasury/Treasury.Application/KaguERP.Modules.Treasury.Application.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Treasury/Treasury.Contracts/">
+    <Project Path="src/Modules/Treasury/Treasury.Contracts/KaguERP.Modules.Treasury.Contracts.csproj" />
   </Folder>
   <Folder Name="/src/Modules/Treasury/Treasury.Infrastructure/">
     <Project Path="src/Modules/Treasury/Treasury.Infrastructure/KaguERP.Modules.Treasury.Infrastructure.csproj" />

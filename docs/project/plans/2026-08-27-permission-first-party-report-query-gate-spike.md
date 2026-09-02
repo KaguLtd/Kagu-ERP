@@ -24,5 +24,5 @@ Gate permission kodu seçmez; versioned report definition tarafından verilen no
 - Query gate explicit, non-empty required permission code ve company scope ister; kodu kendisi seçmez.
 - Fixture permission bulunan scope, aynı transaction içindeki authoritative statement-aging cross-foot'u yükledi.
 - Permission bulunmayan scope'a var olmayan statement/aging ID'leri verildiğinde loader çağrısından önce `PARTY_REPORT_QUERY_DENIED` üretildi; resource-existence yan kanalı açılmadı.
-- `DEC-MP01-012` açık kaldığından production permission kodu, endpoint ve audit composition eklenmedi.
+- Spike tamamlandığında açık olan `DEC-MP01-012` daha sonra onaylandı. Production follow-up, immutable `reporting.party-account.view` kodunu `party.account.detail` version `1` tanımına bağladı; endpoint ve audit kanıtı [production query planında](2026-08-29-party-report-api-query.md) tamamlandı.
 - Gerçek PostgreSQL integration, solution build, domain/architecture ve format kapıları geçti.

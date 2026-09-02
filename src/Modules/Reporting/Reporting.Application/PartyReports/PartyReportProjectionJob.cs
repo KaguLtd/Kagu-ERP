@@ -45,8 +45,8 @@ public interface IPartyAgingPolicySource
 public interface IPartyControlAccountEvidenceSource
 {
     ValueTask<PartyControlAccountEvidence?> LoadAsync(
+        PartyReportSourceBatch source,
         FinancialReportSlice reportSlice,
-        Guid controlAccountId,
         CancellationToken cancellationToken = default);
 }
 
@@ -89,16 +89,22 @@ public sealed class PartyReportProjectionJob(
             command.ProjectionGenerationId, command.GeneratedAt);
 
         PartyControlAccountEvidence controlAccounts = await controlAccountSource.LoadAsync(
-            pair.Statement.ReportSlice, source.ControlAccountId, cancellationToken) ??
+            source, pair.Statement.ReportSlice, cancellationToken) ??
             throw new PartyReportProjectionJobException(
                 "PARTY_CONTROL_ACCOUNT_EVIDENCE_NOT_FOUND",
                 "Subledger and general-ledger evidence is required before projection publication.");
         EnsureBalanceContext(source.ControlAccountId, pair.Statement.ReportSlice, controlAccounts.Subledger);
         EnsureBalanceContext(source.ControlAccountId, pair.Statement.ReportSlice, controlAccounts.GeneralLedger);
-        _ = ControlAccountReconciliationResult.Create(
+        ControlAccountReconciliationResult reconciliation = ControlAccountReconciliationResult.Create(
             command.ControlAccountReconciliationId,
             controlAccounts.Subledger,
             controlAccounts.GeneralLedger);
+        if (!reconciliation.IsReconciled)
+        {
+            throw new PartyReportProjectionJobException(
+                "PARTY_CONTROL_ACCOUNT_RECONCILIATION_DIFFERENCE",
+                "Party subledger and general-ledger control-account balances do not reconcile.");
+        }
 
         return await projectionSink.PublishAsync(
             new PartyReportProjectionPublication(command, source, pair, controlAccounts), cancellationToken);

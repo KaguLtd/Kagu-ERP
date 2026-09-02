@@ -8,7 +8,8 @@ namespace KaguERP.Modules.Treasury.Infrastructure.Persistence;
 
 public sealed record LoadedReconciliationProposal(
     ValidatedReconciliationProposal Proposal,
-    DateTimeOffset RecordedAt);
+    DateTimeOffset RecordedAt,
+    Guid RecordedBy);
 
 public static class PostgresReconciliationProposalLoader
 {
@@ -34,13 +35,14 @@ public static class PostgresReconciliationProposalLoader
         scope.EnsureAllowed(scope.TenantId, companyId);
 
         const string headerSql = """
-            SELECT treasury_account_id,currency,recorded_at
+            SELECT treasury_account_id,currency,recorded_at,recorded_by
             FROM treasury.reconciliation_proposal
             WHERE tenant_id=$1 AND company_id=$2 AND reconciliation_id=$3
             """;
         Guid treasuryAccountId;
         TreasuryCurrencyCode currency;
         DateTimeOffset recordedAt;
+        Guid recordedBy;
         await using (var header = new NpgsqlCommand(headerSql, connection, transaction))
         {
             header.Parameters.AddWithValue(scope.TenantId);
@@ -54,6 +56,7 @@ public static class PostgresReconciliationProposalLoader
             treasuryAccountId = reader.GetGuid(0);
             currency = TreasuryCurrencyCode.Create(reader.GetString(1));
             recordedAt = reader.GetFieldValue<DateTimeOffset>(2);
+            recordedBy = reader.GetGuid(3);
         }
 
         const string matchSql = """
@@ -91,6 +94,7 @@ public static class PostgresReconciliationProposalLoader
         return new LoadedReconciliationProposal(
             ValidatedReconciliationProposal.Create(
                 reconciliationId, scope.TenantId, companyId, treasuryAccountId, currency, matches),
-            recordedAt);
+            recordedAt,
+            recordedBy);
     }
 }

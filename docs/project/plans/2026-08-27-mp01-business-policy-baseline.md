@@ -13,7 +13,7 @@
 
 ## Master plan ilişkisi
 
-Bu çalışma `DEC-MP01-001`–`009` ve `012` için ürün politikası kanıtı oluşturur. `DEC-MP01-010` banka/reconciliation, `DEC-MP01-011` stok ve `013` sonrası resmi/production kararları açık kalır. Bu nedenle MP-01 tamamlanmaz; fakat MP-03'ün cari ve muhasebe çekirdeği dilimleri `in-progress` olabilir.
+Bu çalışma `DEC-MP01-001`–`010`, `012` ve `021`–`024` için ürün politikası kanıtı oluşturur. `DEC-MP01-011` stok ve `013` sonrası resmi/production kararları açık kalır. Bu nedenle MP-01 tamamlanmaz; fakat MP-03'ün cari, banka ve muhasebe çekirdeği dilimleri `in-progress` olabilir.
 
 ## Kapsam
 
@@ -60,6 +60,8 @@ Bu çalışma `DEC-MP01-001`–`009` ve `012` için ürün politikası kanıtı 
 | 3 | Opening event kanıtı | Ayrı append-only event, scope/permission ve source uniqueness | completed |
 | 4 | Authoritative Party report source adapter | Opening/due, original/counter impact ve restriction evidence aynı as-of/cutoff kesitinde explicit | completed |
 | 5 | Gerçek PostgreSQL ve repository kapıları | 0033 boş/verili DB, RLS, lifecycle negatifleri ve full verify geçti | completed |
+| 6 | Exact Party→GL control evidence ve job/sink | Active journal lineage checksum'a bağlı; gerçek due source persisted statement/aging/GL setine sıfır farkla yayımlandı | completed |
+| 7 | Opening aging/open-item semantiği | `DEC-MP01-021`: explicit due/payment-term satırları, exact total ve allocation | validating |
 
 ## Test planı
 
@@ -79,6 +81,13 @@ Bu çalışma `DEC-MP01-001`–`009` ve `012` için ürün politikası kanıtı 
 | 2026-08-27 | 120/320 resmi doğruluğu uzman onaysız | Yanlış mali eşleme riski | Sürümlü taslak; production ve yasal uyum beyanı bloklu |
 | 2026-08-27 | Mevcut PartyAccount rol taşımıyor | Rapor balance side tahmin edilemiyor | Expand migration ve explicit classification |
 | 2026-08-28 | Aktif posted-source okuması counter-event lifecycle'ını tek başına kanıtlamıyordu | Unallocation/reversal raporda original etkiyi yanlış canlandırabilirdi | Exact `NotPosted`/`Active`/`Reversed` lifecycle portu ve çift-ters negatif testi eklendi |
+| 2026-08-29 | Control evidence portu source PartyAccount/journal setini almıyordu | Aynı tutarlı fakat ilgisiz GL bakiyesi reconciliation'ı yanlış yeşile çevirebilirdi | Exact posting lineage source checksum V2'ye ve control portuna bağlandı; eksik control line fail-closed |
+| 2026-08-29 | Job reconciliation sonucunu oluşturup sıfır farkı zorunlu kılmıyordu | Farklı subledger/GL closing ile projection yayımlanabilirdi | Sıfır olmayan fark `PARTY_CONTROL_ACCOUNT_RECONCILIATION_DIFFERENCE` ile zero-publish |
+| 2026-08-29 | Opening event due date/open-item kimliği taşımıyor | Opening statement ve GL'ye girse de aging/allocation semantiği yeniden üretilemez | Tahmin yapılmadı; explicit ürün kararı ve expand migration bekleyen milestone 7 açıldı |
+| 2026-08-30 | Worker rapor refresh service identity ve company scope otoritesi tanımlı değildi | Zamanlanmış iş kullanıcıyı taklit edebilir veya yetki iptalinden sonra kapsam aşabilirdi | `DEC-MP01-020`: ayrı service identity, tek tenant, deployment + IAM company allow-list kesişimi ve `reporting.party-account.refresh` permission'ı; production provisioning açık |
+| 2026-08-31 | Opening vadesi, banka kesinleşme anı ve refresh producer açık kaldı | Aging/allocation, reconciliation ve Worker işi tetikleme tamamlanamazdı | `DEC-MP01-021`–`023` önerileri kullanıcı tarafından onaylandı |
+| 2026-08-31 | Her oturumda full regresyon tekrar ediliyordu | Geliştirme süresi ve çıktı maliyeti artıyordu | `DEC-MP01-024`: dilimde dar risk testi, MP validating/kapanışında birleşik full paket |
+| 2026-08-31 | Yeniden derlenen unit/integration DLL'leri Windows Application Control tarafından `0x800711C7` ile engelleniyor | Dar opening runtime ve gerçek PostgreSQL kanıtı bu ortamda çalıştırılamıyor | Politika bypass edilmedi; iki ilgili proje 0 warning/error derlendi, runtime + DB golden MP validating paketinde açık kapı |
 
 ## İlerleme günlüğü
 
@@ -115,7 +124,28 @@ Bu çalışma `DEC-MP01-001`–`009` ve `012` için ürün politikası kanıtı 
 - Authoritative restriction loader ve Party source adapter sıfır olayda `Clear`; aktif kombinasyonlarda `Disputed`, `Blocked` veya `DisputedAndBlocked` üretiyor. Late-recorded release geçmiş kesime sızmadı; farklı payload replay, ikinci aktif dispute, cross-company ID ve runtime UPDATE/DELETE reddedildi.
 - Mevcut DB'de `0034+0035` sırasıyla `1/0` uygulandı; boş `kagu_erp_restriction_blank_20260828_01` DB'sinde `35/0` migration ve tam PostgreSQL/RLS paketi geçti, geçici DB silindi. İlk boş-DB tekrarı .NET 100 ns/PostgreSQL µs farkını yakaladı; restriction recorded-at domain girişinde µs hassasiyetine kanoniklenerek replay kararlı hale getirildi.
 - Restriction değişikliğinde Release build `0 warning/error`, architecture/API host `20`, format ve diff kapıları geçti. Domain host `63` testi ilk çalışmada geçti; sonraki yeniden üretilmiş Parties DLL'i Windows Application Control tarafından `0x800711C7` ile engellendi, güvenlik politikası bypass edilmedi.
-- Sıradaki kesin adım: gerçek Party source'u mevcut projection job/sink ile birleştirip source→statement/aging→GL golden cross-foot kapısını çalıştırmak.
+- Sıradaki kesin adım: opening event'in explicit due date/payment-term ve allocation yapılabilir open-item davranışını ürün kararıyla kapatıp opening dahil source→statement/aging→GL golden cross-foot'u çalıştırmak.
+
+### 2026-08-29
+
+- Party source checksum V2, aktif posted journal ID ve exact source type/event/version/purpose ile effective/recorded/posted kesimini canonical `PostingLineage` seti olarak kapsıyor; changed journal checksum'ı değiştiriyor ve koleksiyon defensive copy ile korunuyor.
+- Accounting-owned exact control-account loader her Party journal'ının header bağlamını ve seçili control-account satırını yeniden doğruluyor; etkin reversal, eksik satır veya changed lineage fail-closed. Reporting adapter aynı source fact'lerinden subledger'ı bağımsız türetip GL evidence ile aynı report slice'ta birleştiriyor.
+- Gerçek PostgreSQL'de fonksiyonel parası TRY olan posted `75 GBP` due source, projection job ve atomic sink üzerinden persisted statement=`75 GBP`, aging=`75 GBP`, subledger=`75 GBP`, GL transaction görünümü=`75 GBP` olarak yayımlandı; aynı command replay'i yeni fact üretmedi. Wrong-company, wrong-transaction-currency ve eksik control-line negatifleri geçti.
+- Aynı gerçek fixture'ın `25 GBP` opening + `75 GBP` due + `10 GBP` allocation + `10 GBP` unallocation kesiti subledger ve GL tarafında `110 debit - 10 credit = 100 GBP` sıfır fark verdi.
+- Full opening→aging golden henüz kapatılmadı: opening event ayrı due date/payment-term/open-item kimliği taşımıyor. `effective date = due date` veya aging dışlama varsayımı yapılmadı; opening'i allocation yapılabilir aging kalemine dönüştürecek ürün kararı bekleniyor.
+- Release solution build `0 warning/error`; domain host `63`, architecture/API host `20`; migration idempotency `0/0` ve tam PostgreSQL tenant/company RLS integration paketi geçti.
+- Şirket aging policy'si append-only definition stream'e taşındı. Effective date ve recorded cutoff kesiminde en yüksek uygun sürümü seçen PostgreSQL adapter gerçek golden job'a bağlandı; sabit test policy kaynağı kaldırıldı. Policy kimliği/sürüm sırası, tam bucket kapsamı, cross-company RLS ve append-only runtime privilege negatifleri geçti.
+- `0036+0037` mevcut DB'ye ileri uygulanıp son yükseltmede `1/0` idempotent kaldı; ayrı boş DB'de `37/0` migration ve tam RLS integration paketi geçti. Runtime append-only policy insert ayrıca kanıtlandı. Geçici DB silindi, test PostgreSQL kümesi durduruldu.
+- Production Party report sözleşmesi `party.account.detail` version `1` ve `reporting.party-account.view` olarak uygulandı. `POST /api/v1/reports/{code}/queries`, company/permission kontrolünü projection lookup'tan önce yapıyor; allowed, denied ve not-found audit kararlarını aynı PostgreSQL transaction'ında kalıcılaştırıyor. API yalnız Application portuna bağlı, PostgreSQL adapter ve ortak audit appender Bootstrap composition root'ta bağlanıyor.
+- Production query eklerinden sonra Release solution build `0 warning/error`, domain host `63`, architecture/API host `20`, format ve gerçek PostgreSQL tenant/company RLS paketi geçti; migration tekrarı `0/0` kaldı. Opening-aging ürün kararı değiştirilmedi.
+
+### 2026-08-31
+
+- `DEC-MP01-021` uygulandı: yeni opening draft bir veya daha fazla explicit due date/payment-term snapshot satırı ve due-schedule kimliği olmadan üretilemiyor; satır toplamı source amount'a exact eşit ve kimlikler tekil.
+- Opening writer authoritative PartyAccount'tan Party/currency/control-account/balance-side bağlamını alıyor, receivable için debit ve payable için credit doğal yönünü zorunlu kılıyor ve opening event ile allocatable due schedule'ı aynı caller transaction'ında idempotent saklıyor.
+- Mevcut `party.due_schedule` altyapısı yeterli olduğundan yeni tablo veya migration üretilmedi. Legacy opening kayıtlarına vade uydurulmadı; yalnız yeni settleable opening'ler due/open-item yoluna giriyor.
+- Party report source, due schedule'a bağlanmış opening'i eski `OpeningExposure` toplamından çıkarıp normal open-item olarak tek kez okuyor. Böylece aging, oldest-due allocation ve restriction altyapısı opening için de aynen kullanılıyor; legacy opening davranışı korunuyor.
+- Unit harness test-adı filtresi aldı; filtresiz koşu MP kapanışındaki tam unit paketidir. Etkilenen Unit ve Integration projeleri ayrı ayrı `0 warning / 0 error` derlendi, `git diff --check` temiz geçti. Dar runtime test Windows Application Control `0x800711C7` nedeniyle çalışmadı; gerçek PostgreSQL opening→aging→GL golden ile birlikte MP validating kapısında açık kalır.
 
 ## Tamamlanma kanıtı
 
@@ -123,6 +153,6 @@ Bu çalışma `DEC-MP01-001`–`009` ve `012` için ürün politikası kanıtı 
 - [x] Migration ve compatibility kanıtı.
 - [x] Tenant/company negatif testleri.
 - [x] Opening event append-only ve idempotency kanıtı.
-- [ ] Source→statement/aging→GL cross-foot.
+- [ ] Source→statement/aging→GL cross-foot (opening open-item implementasyonu derlendi; runtime/gerçek PostgreSQL tekrarları Application Control engeli nedeniyle validating).
 - [x] Çalıştırılan komutlar ve sonuçlar.
-- [ ] MP-03 kapı etkisi MASTER_PLAN içinde güncel.
+- [x] MP-03 kapı etkisi MASTER_PLAN içinde güncel.

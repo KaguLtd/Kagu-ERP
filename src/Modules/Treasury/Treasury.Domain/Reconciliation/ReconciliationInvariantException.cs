@@ -8,5 +8,11 @@ public sealed class ReconciliationInvariantException : InvalidOperationException
         Code = code;
     }
 
+    public ReconciliationInvariantException(string code, string message, Exception innerException)
+        : base(message, innerException)
+    {
+        Code = code;
+    }
+
     public string Code { get; }
 }

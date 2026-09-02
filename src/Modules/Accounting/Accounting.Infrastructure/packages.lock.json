@@ -41,10 +41,14 @@
         "type": "Project",
         "dependencies": {
           "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
-          "KaguERP.Modules.Accounting.Domain": "[1.0.0, )"
+          "KaguERP.Modules.Accounting.Domain": "[1.0.0, )",
+          "KaguERP.Modules.Treasury.Contracts": "[1.0.0, )"
         }
       },
       "kaguerp.modules.accounting.domain": {
+        "type": "Project"
+      },
+      "kaguerp.modules.treasury.contracts": {
         "type": "Project"
       }
     }

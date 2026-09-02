@@ -37,6 +37,16 @@
       "kaguerp.buildingblocks.domain": {
         "type": "Project"
       },
+      "kaguerp.modules.treasury.application": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Treasury.Domain": "[1.0.0, )"
+        }
+      },
+      "kaguerp.modules.treasury.contracts": {
+        "type": "Project"
+      },
       "kaguerp.modules.treasury.domain": {
         "type": "Project"
       }

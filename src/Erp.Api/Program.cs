@@ -1,5 +1,6 @@
 using KaguERP.Api.Audit;
 using KaguERP.Api.Observability;
+using KaguERP.Api.Reports;
 using KaguERP.Api.Security;
 using KaguERP.Bootstrap;
 using KaguERP.BuildingBlocks.Application.Audit;
@@ -33,5 +34,6 @@ app.UseAuthorization();
 
 app.MapKaguErpHealthEndpoints();
 app.MapExecutionScopeEndpoint();
+app.MapPartyReportQueryEndpoint();
 
 app.Run();

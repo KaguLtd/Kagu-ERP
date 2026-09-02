@@ -18,6 +18,7 @@ Contract sorgu uygulaması değildir. Explicit opening exposure, balance side, s
 | 1 | Independent `Parties.Contracts` project | Architecture | completed |
 | 2 | Scoped bitemporal request ve immutable source batch | Contract checks | completed |
 | 3 | Explicit restriction-unavailable ve lineage boundaries | Negative checks | completed |
+| 4 | Exact active posted-journal lineage checksum V2 | Defensive copy, changed-journal hash ve gerçek GL composition | completed |
 
 ## Tamamlama kanıtı
 
@@ -26,4 +27,5 @@ Contract sorgu uygulaması değildir. Explicit opening exposure, balance side, s
 - Open-item fact original/remaining/due/source kimlikleri ile yalnız requested cut içinde kalan immutable impact fact'lerini taşır.
 - Restriction evidence `Unavailable` ayrı durumdur ve testte `Clear` durumuna çevrilmeden korundu.
 - Non-UTC cutoff ve cutoff sonrası impact negatif testte reddedildi; 59 domain/contract check ve 18-project architecture kapısı geçti.
-- Contract canonical payload checksum üretimi tamamlandı: scope, kesimler, opening, watermark ve sıralanmış open-item/impact fact'leri length-framed SHA-256 girdisidir. Eşdeğer replay aynı hash'i, değişen lineage farklı hash'i üretir; impact koleksiyonu defensive copy ile korunur. Gerçek Parties adapter'ı sonraki dilimdir.
+- Contract canonical payload checksum üretimi tamamlandı: scope, kesimler, opening, watermark ve sıralanmış open-item/impact fact'leri length-framed SHA-256 girdisidir. Eşdeğer replay aynı hash'i, değişen lineage farklı hash'i üretir; impact koleksiyonu defensive copy ile korunur.
+- 29 Ağustos güncellemesinde checksum V2, rapora dahil aktif journal ID ile exact source type/event/version/purpose ve effective/recorded/posted alanlarını canonical sırada kapsıyor. `PostingLineage` defensive copy'dir; journal değişikliği watermark sabit kalsa da checksum'ı değiştirir. Gerçek Parties adapter'ı bu seti Accounting evidence sonucundan üretir ve Reporting control portuna taşır.

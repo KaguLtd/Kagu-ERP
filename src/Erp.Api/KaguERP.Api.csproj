@@ -1,13 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
-    <PackageReference Include="Npgsql" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
     <ProjectReference Include="..\BuildingBlocks\Contracts\KaguERP.BuildingBlocks.Contracts.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <Compile Include="..\Erp.Bootstrap\*.cs" LinkBase="Bootstrap" />
+    <ProjectReference Include="..\Erp.Bootstrap\KaguERP.Bootstrap.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Modules\Reporting\Reporting.Application\KaguERP.Modules.Reporting.Application.csproj" PrivateAssets="all" />
   </ItemGroup>
 </Project>

@@ -1,5 +1,7 @@
 using KaguERP.Modules.Parties.Application.Openings;
 using KaguERP.Modules.Parties.Domain.Accounts;
+using KaguERP.Modules.Parties.Domain.Allocations;
+using KaguERP.Modules.Parties.Domain.DueSchedules;
 using KaguERP.Modules.Parties.Domain.Openings;
 using Npgsql;
 
@@ -9,6 +11,7 @@ public sealed record PartyAccountOpeningPersistenceResult(
     Guid OpeningEventId,
     bool Created,
     long SourceVersion,
+    Guid DueScheduleId,
     PartyAccountBalanceSide BalanceSide,
     string Currency,
     Guid ControlAccountId,
@@ -36,6 +39,8 @@ public static class PostgresPartyAccountOpeningWriter
             transaction,
             draft,
             cancellationToken);
+        EnsureNaturalEntrySide(draft, account);
+        ValidatedDueSchedule dueSchedule = CreateDueSchedule(draft, account);
 
         const string insertSql = """
             INSERT INTO party.party_account_opening_event
@@ -46,27 +51,68 @@ public static class PostgresPartyAccountOpeningWriter
             ON CONFLICT (tenant_id, company_id, opening_event_id) DO NOTHING
             RETURNING opening_event_id
             """;
+        var created = false;
         await using (var insert = new NpgsqlCommand(insertSql, connection, transaction))
         {
             AddParameters(insert, preparation, account);
             object? inserted = await insert.ExecuteScalarAsync(cancellationToken);
-            if (inserted is Guid insertedId)
-            {
-                return CreateResult(insertedId, true, draft, account);
-            }
+            created = inserted is Guid;
         }
 
-        const string existingSql = """
+        if (!created)
+        {
+            await ValidateExistingOpeningAsync(
+                connection,
+                transaction,
+                preparation,
+                account,
+                cancellationToken);
+        }
+
+        DueSchedulePersistenceResult persistedSchedule = await PostgresDueScheduleWriter.PersistAsync(
+            connection,
+            transaction,
+            new DueSchedulePersistenceCommand(
+                preparation.Scope,
+                account.PartyId,
+                account.BalanceSide,
+                draft.DueScheduleId,
+                PartyAccountOpeningDraft.SourceType,
+                draft.SourceVersion,
+                draft.EffectiveDate,
+                PartyAccountOpeningDraft.PostingPurpose,
+                account.ControlAccountId,
+                draft.RecordedAt,
+                dueSchedule),
+            cancellationToken);
+
+        return CreateResult(
+            draft.OpeningEventId,
+            created,
+            persistedSchedule.DueScheduleId,
+            draft,
+            account);
+    }
+
+    private static async ValueTask ValidateExistingOpeningAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        AuthorizedPartyAccountOpeningPreparation preparation,
+        PartyAccountPostingContext account,
+        CancellationToken cancellationToken)
+    {
+        PartyAccountOpeningDraft draft = preparation.Draft;
+        const string sql = """
             SELECT source_version, party_account_id, balance_side, currency, control_account_id,
                    entry_side, original_amount, effective_date, recorded_at, recorded_by
             FROM party.party_account_opening_event
             WHERE tenant_id=$1 AND company_id=$2 AND opening_event_id=$3
             """;
-        await using var existing = new NpgsqlCommand(existingSql, connection, transaction);
-        existing.Parameters.AddWithValue(draft.TenantId);
-        existing.Parameters.AddWithValue(draft.CompanyId);
-        existing.Parameters.AddWithValue(draft.OpeningEventId);
-        await using NpgsqlDataReader reader = await existing.ExecuteReaderAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        command.Parameters.AddWithValue(draft.TenantId);
+        command.Parameters.AddWithValue(draft.CompanyId);
+        command.Parameters.AddWithValue(draft.OpeningEventId);
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
         {
             throw new InvalidOperationException("Opening event is not visible after its identity conflict.");
@@ -85,8 +131,6 @@ public static class PostgresPartyAccountOpeningWriter
         {
             throw new PartyAccountOpeningPersistenceConflictException(draft.OpeningEventId);
         }
-
-        return CreateResult(draft.OpeningEventId, false, draft, account);
     }
 
     private static async ValueTask<PartyAccountPostingContext> LoadAccountContextAsync(
@@ -96,7 +140,7 @@ public static class PostgresPartyAccountOpeningWriter
         CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT balance_side, currency, control_account_id
+            SELECT party_id, balance_side, currency, control_account_id
             FROM party.party_account
             WHERE tenant_id=$1 AND company_id=$2 AND party_account_id=$3
             """;
@@ -109,21 +153,67 @@ public static class PostgresPartyAccountOpeningWriter
         {
             throw new PartyAccountOpeningAccountUnavailableException(draft.PartyAccountId);
         }
-        if (reader.IsDBNull(0))
+        if (reader.IsDBNull(1))
         {
             throw new PartyAccountOpeningAccountUnclassifiedException(draft.PartyAccountId);
         }
 
-        short persistedBalanceSide = reader.GetInt16(0);
+        short persistedBalanceSide = reader.GetInt16(1);
         if (!Enum.IsDefined(typeof(PartyAccountBalanceSide), persistedBalanceSide))
         {
             throw new PartyAccountOpeningAccountUnclassifiedException(draft.PartyAccountId);
         }
 
         return new PartyAccountPostingContext(
+            reader.GetGuid(0),
             (PartyAccountBalanceSide)persistedBalanceSide,
-            reader.GetString(1),
-            reader.GetGuid(2));
+            reader.GetString(2),
+            reader.GetGuid(3));
+    }
+
+    private static void EnsureNaturalEntrySide(
+        PartyAccountOpeningDraft draft,
+        PartyAccountPostingContext account)
+    {
+        PartyAccountOpeningEntrySide expected = account.BalanceSide == PartyAccountBalanceSide.Receivable
+            ? PartyAccountOpeningEntrySide.Debit
+            : PartyAccountOpeningEntrySide.Credit;
+        if (draft.EntrySide != expected)
+        {
+            throw new PartyAccountOpeningEntrySideAccountMismatchException(
+                draft.PartyAccountId,
+                account.BalanceSide,
+                draft.EntrySide);
+        }
+    }
+
+    private static ValidatedDueSchedule CreateDueSchedule(
+        PartyAccountOpeningDraft draft,
+        PartyAccountPostingContext account)
+    {
+        AllocationCurrencyCode currency = AllocationCurrencyCode.Create(account.Currency);
+        DueScheduleLine[] lines = draft.DueLines
+            .Select(line => DueScheduleLine.Create(
+                draft.TenantId,
+                draft.CompanyId,
+                draft.PartyAccountId,
+                draft.OpeningEventId,
+                line.DueScheduleLineId,
+                currency,
+                line.OriginalAmount,
+                line.DueDate,
+                line.PaymentTermSnapshotId,
+                line.PaymentTermVersion,
+                account.ControlAccountId))
+            .ToArray();
+        return ValidatedDueSchedule.Create(
+            draft.TenantId,
+            draft.CompanyId,
+            draft.PartyAccountId,
+            draft.OpeningEventId,
+            currency,
+            draft.OriginalAmount,
+            lines);
     }
 
     private static void AddParameters(
@@ -150,21 +240,36 @@ public static class PostgresPartyAccountOpeningWriter
     private static PartyAccountOpeningPersistenceResult CreateResult(
         Guid openingEventId,
         bool created,
+        Guid dueScheduleId,
         PartyAccountOpeningDraft draft,
         PartyAccountPostingContext account) =>
         new(
             openingEventId,
             created,
             draft.SourceVersion,
+            dueScheduleId,
             account.BalanceSide,
             account.Currency,
             account.ControlAccountId,
             draft.RecordedAt);
 
     private sealed record PartyAccountPostingContext(
+        Guid PartyId,
         PartyAccountBalanceSide BalanceSide,
         string Currency,
         Guid ControlAccountId);
+}
+
+public sealed class PartyAccountOpeningEntrySideAccountMismatchException(
+    Guid partyAccountId,
+    PartyAccountBalanceSide balanceSide,
+    PartyAccountOpeningEntrySide entrySide)
+    : InvalidOperationException("The opening entry side is opposite to the PartyAccount natural balance side.")
+{
+    public string Code { get; } = "PARTY_OPENING_ENTRY_SIDE_ACCOUNT_MISMATCH";
+    public Guid PartyAccountId { get; } = partyAccountId;
+    public PartyAccountBalanceSide BalanceSide { get; } = balanceSide;
+    public PartyAccountOpeningEntrySide EntrySide { get; } = entrySide;
 }
 
 public sealed class PartyAccountOpeningPersistenceConflictException(Guid openingEventId)

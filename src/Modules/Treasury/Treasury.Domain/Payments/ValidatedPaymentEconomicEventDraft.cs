@@ -12,7 +12,9 @@ public sealed class ValidatedPaymentEconomicEventDraft
         DateOnly effectiveDate,
         DateTimeOffset recordedAt,
         PaymentSourceIdentity sourceIdentity,
-        SameCurrencyPaymentRateSnapshot rateSnapshot)
+        PaymentRateSnapshot rateSnapshot,
+        decimal unroundedFunctionalAmount,
+        decimal roundingDifference)
     {
         PaymentId = paymentId;
         PartyAccountId = partyAccountId;
@@ -24,6 +26,8 @@ public sealed class ValidatedPaymentEconomicEventDraft
         RecordedAt = recordedAt;
         SourceIdentity = sourceIdentity;
         RateSnapshot = rateSnapshot;
+        UnroundedFunctionalAmount = unroundedFunctionalAmount;
+        RoundingDifference = roundingDifference;
     }
 
     public Guid PaymentId { get; }
@@ -48,7 +52,11 @@ public sealed class ValidatedPaymentEconomicEventDraft
 
     public PaymentSourceIdentity SourceIdentity { get; }
 
-    public SameCurrencyPaymentRateSnapshot RateSnapshot { get; }
+    public PaymentRateSnapshot RateSnapshot { get; }
+
+    public decimal UnroundedFunctionalAmount { get; }
+
+    public decimal RoundingDifference { get; }
 
     public static ValidatedPaymentEconomicEventDraft Create(
         Guid paymentId,
@@ -64,7 +72,7 @@ public sealed class ValidatedPaymentEconomicEventDraft
         string sourceType,
         Guid sourceEventId,
         string postingPurpose,
-        SameCurrencyPaymentRateSnapshot? rateSnapshot)
+        PaymentRateSnapshot? rateSnapshot)
     {
         RequireId(paymentId, "PAYMENT_ID_REQUIRED", "Payment ID is required.");
         RequireId(partyAccountId, "PAYMENT_PARTY_ACCOUNT_REQUIRED", "Payment party-account ID is required.");
@@ -80,13 +88,6 @@ public sealed class ValidatedPaymentEconomicEventDraft
             throw new PaymentInvariantException(
                 "PAYMENT_AMOUNT_INVALID",
                 "Payment transaction and functional amounts must be positive.");
-        }
-
-        if (transactionAmount != functionalAmount)
-        {
-            throw new PaymentInvariantException(
-                "PAYMENT_FUNCTIONAL_AMOUNT_MISMATCH",
-                "Same-currency payment transaction and functional amounts must match exactly.");
         }
 
         if (recordedAt.Offset != TimeSpan.Zero)
@@ -114,6 +115,20 @@ public sealed class ValidatedPaymentEconomicEventDraft
             throw new PaymentInvariantException("PAYMENT_RATE_COMPANY_MISMATCH", "Payment and rate companies must match.");
         }
 
+        if (rateSnapshot.RateDate != effectiveDate)
+        {
+            throw new PaymentInvariantException(
+                "PAYMENT_RATE_DATE_MISMATCH",
+                "Payment rate date must equal the payment effective date.");
+        }
+        PaymentFunctionalAmount calculated = rateSnapshot.Calculate(transactionAmount);
+        if (functionalAmount != calculated.FunctionalAmount)
+        {
+            throw new PaymentInvariantException(
+                "PAYMENT_FUNCTIONAL_AMOUNT_MISMATCH",
+                "Payment functional amount must match the immutable rate and rounding snapshot exactly.");
+        }
+
         return new ValidatedPaymentEconomicEventDraft(
             paymentId,
             partyAccountId,
@@ -124,7 +139,9 @@ public sealed class ValidatedPaymentEconomicEventDraft
             effectiveDate,
             recordedAt,
             sourceIdentity,
-            rateSnapshot);
+            rateSnapshot,
+            calculated.UnroundedFunctionalAmount,
+            calculated.RoundingDifference);
     }
 
     private static void RequireId(Guid value, string code, string message)

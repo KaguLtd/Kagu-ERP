@@ -26,3 +26,9 @@
 ## Açık sınır
 
 Bu dilim public endpoint veya yasal numaralama açmaz. Üst seviye idempotency completion'ın final posted response'a taşınması, reversal persistence ve gerçek source/workflow command'ları ayrıca kanıtlanacaktır.
+
+## 31 Ağustos 2026 composite approval subject continuation
+
+Reconciliation gibi tek immutable onayın birden fazla tarihli journal kaynağını kapsadığı durumda journal source identity ile workflow subject identity aynı değildir. `ApprovalSubjectReference`, bu iki kimliği yalnız aynı tenant/company kapsamında ayırır. Preparation ve posting orchestrator'ları explicit subject verilmezse eski source-derived davranışı aynen korur; verilirse authoritative completion evidence'ı exact subject/version ile yükler ve posted writer aynı bağı tekrar doğrular. Böylece çok günlük banka satırlarını tek yanlış effective date'e sıkıştırmadan proposal-level maker-checker kanıtı korunabilir.
+
+Accounting Application ve Infrastructure hedef derlemeleri `0 warning / 0 error` geçti. Transit journal fact/factory ve aynı transaction Treasury approval→çoklu journal composition sıradaki açık adımdır; bu altyapı değişikliği tek başına banka GL hesabını kapatmaz.

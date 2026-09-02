@@ -7,13 +7,15 @@ public sealed class AuthorizedPartyAccountOpeningPreparation
 {
     public const string RequiredPermission = "party.opening-balance.create";
 
-    private AuthorizedPartyAccountOpeningPreparation(Guid actorId, PartyAccountOpeningDraft draft)
+    private AuthorizedPartyAccountOpeningPreparation(ExecutionScope scope, PartyAccountOpeningDraft draft)
     {
-        ActorId = actorId;
+        Scope = scope;
         Draft = draft;
     }
 
-    public Guid ActorId { get; }
+    public ExecutionScope Scope { get; }
+
+    public Guid ActorId => Scope.ActorId;
 
     public PartyAccountOpeningDraft Draft { get; }
 
@@ -30,7 +32,7 @@ public sealed class AuthorizedPartyAccountOpeningPreparation
             throw new PartyAccountOpeningAuthorizationException();
         }
 
-        return new AuthorizedPartyAccountOpeningPreparation(scope.ActorId, draft);
+        return new AuthorizedPartyAccountOpeningPreparation(scope, draft);
     }
 }
 

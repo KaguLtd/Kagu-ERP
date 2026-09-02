@@ -1,4 +1,5 @@
 using KaguERP.Bootstrap;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -13,6 +14,8 @@ builder.Logging.AddJsonConsole(options =>
 });
 
 builder.Services.AddKaguErpBootstrap(builder.Configuration);
+builder.Services.AddKaguErpPartyReportRefreshWorker(builder.Configuration);
+builder.Services.AddHostedService<PartyReportRefreshBackgroundService>();
 
 using var host = builder.Build();
 await host.RunAsync();

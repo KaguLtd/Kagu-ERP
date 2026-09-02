@@ -2,11 +2,19 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
-      "Npgsql": {
-        "type": "Direct",
-        "requested": "[10.0.3, )",
-        "resolved": "10.0.3",
-        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w=="
+      "kaguerp.bootstrap": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Accounting.Infrastructure": "[1.0.0, )",
+          "KaguERP.Modules.Parties.Infrastructure": "[1.0.0, )",
+          "KaguERP.Modules.Reporting.Application": "[1.0.0, )",
+          "KaguERP.Modules.Reporting.Infrastructure": "[1.0.0, )",
+          "KaguERP.Modules.Treasury.Application": "[1.0.0, )",
+          "KaguERP.Modules.Treasury.Contracts": "[1.0.0, )",
+          "KaguERP.Modules.Treasury.Infrastructure": "[1.0.0, )",
+          "Npgsql": "[10.0.3, )"
+        }
       },
       "kaguerp.buildingblocks.application": {
         "type": "Project",
@@ -20,6 +28,97 @@
       },
       "kaguerp.buildingblocks.domain": {
         "type": "Project"
+      },
+      "kaguerp.modules.accounting.application": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Accounting.Domain": "[1.0.0, )",
+          "KaguERP.Modules.Treasury.Contracts": "[1.0.0, )"
+        }
+      },
+      "kaguerp.modules.accounting.domain": {
+        "type": "Project"
+      },
+      "kaguerp.modules.accounting.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Accounting.Application": "[1.0.0, )",
+          "KaguERP.Modules.Accounting.Domain": "[1.0.0, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
+      "kaguerp.modules.parties.application": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Parties.Domain": "[1.0.0, )"
+        }
+      },
+      "kaguerp.modules.parties.contracts": {
+        "type": "Project"
+      },
+      "kaguerp.modules.parties.domain": {
+        "type": "Project"
+      },
+      "kaguerp.modules.parties.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Parties.Application": "[1.0.0, )",
+          "KaguERP.Modules.Parties.Contracts": "[1.0.0, )",
+          "KaguERP.Modules.Parties.Domain": "[1.0.0, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
+      "kaguerp.modules.reporting.application": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.Modules.Parties.Contracts": "[1.0.0, )",
+          "KaguERP.Modules.Reporting.Domain": "[1.0.0, )"
+        }
+      },
+      "kaguerp.modules.reporting.domain": {
+        "type": "Project"
+      },
+      "kaguerp.modules.reporting.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Reporting.Application": "[1.0.0, )",
+          "KaguERP.Modules.Reporting.Domain": "[1.0.0, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
+      "kaguerp.modules.treasury.application": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Treasury.Domain": "[1.0.0, )"
+        }
+      },
+      "kaguerp.modules.treasury.contracts": {
+        "type": "Project"
+      },
+      "kaguerp.modules.treasury.domain": {
+        "type": "Project"
+      },
+      "kaguerp.modules.treasury.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Treasury.Application": "[1.0.0, )",
+          "KaguERP.Modules.Treasury.Contracts": "[1.0.0, )",
+          "KaguERP.Modules.Treasury.Domain": "[1.0.0, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
+      "Npgsql": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.3, )",
+        "resolved": "10.0.3",
+        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w=="
       }
     }
   }

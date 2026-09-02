@@ -34,6 +34,33 @@ public sealed class ValidatedReconciliationProposal
 
     public IReadOnlyList<ReconciliationMatchDraft> Matches { get; }
 
+    public void EnsureZeroTolerance()
+    {
+        foreach (IGrouping<Guid, ReconciliationMatchDraft> statementGroup in
+                 Matches.GroupBy(match => match.StatementLine.StatementLineId))
+        {
+            decimal matched = SumChecked(statementGroup);
+            if (matched != statementGroup.First().StatementLine.MatchCapacity)
+            {
+                throw new ReconciliationInvariantException(
+                    "RECONCILIATION_STATEMENT_ZERO_TOLERANCE_NOT_MET",
+                    "Every approved statement line must be matched exactly with zero tolerance.");
+            }
+        }
+
+        foreach (IGrouping<Guid, ReconciliationMatchDraft> movementGroup in
+                 Matches.GroupBy(match => match.Movement.MovementId))
+        {
+            decimal matched = SumChecked(movementGroup);
+            if (matched != movementGroup.First().Movement.UsableAmount)
+            {
+                throw new ReconciliationInvariantException(
+                    "RECONCILIATION_MOVEMENT_ZERO_TOLERANCE_NOT_MET",
+                    "Every approved internal movement must be matched exactly with zero tolerance.");
+            }
+        }
+    }
+
     public static ValidatedReconciliationProposal Create(
         Guid reconciliationId,
         Guid tenantId,
@@ -195,6 +222,26 @@ public sealed class ValidatedReconciliationProposal
     {
         totals.TryGetValue(id, out var current);
         totals[id] = current + amount;
+    }
+
+    private static decimal SumChecked(IEnumerable<ReconciliationMatchDraft> matches)
+    {
+        decimal total = decimal.Zero;
+        try
+        {
+            foreach (ReconciliationMatchDraft match in matches)
+            {
+                total = checked(total + match.MatchedAmount);
+            }
+        }
+        catch (OverflowException exception)
+        {
+            throw new ReconciliationInvariantException(
+                "RECONCILIATION_MATCH_TOTAL_OVERFLOW",
+                "Reconciliation match total exceeded decimal range.",
+                exception);
+        }
+        return total;
     }
 
     private static int CompareMatches(ReconciliationMatchDraft left, ReconciliationMatchDraft right)

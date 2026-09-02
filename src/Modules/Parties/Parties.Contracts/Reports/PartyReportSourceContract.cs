@@ -25,6 +25,16 @@ public sealed record PartyReportImpactFact(
     DateTimeOffset RecordedAt,
     Guid? ReversesEventId);
 
+public sealed record PartyReportPostingLineageFact(
+    Guid JournalId,
+    string SourceType,
+    Guid SourceEventId,
+    long SourceVersion,
+    string PostingPurpose,
+    DateOnly EffectiveDate,
+    DateTimeOffset RecordedAt,
+    DateTimeOffset PostedAt);
+
 public sealed record PartyOpenItemSourceFact(
     Guid OpenItemId,
     Guid SourceEventId,
@@ -45,7 +55,8 @@ public sealed class PartyReportSourceBatch
         PartyReportBalanceSide balanceSide, string currency, DateOnly effectiveAsOf,
         DateTimeOffset recordedCutoff, decimal openingExposure, string sourceWatermarkFrom,
         string sourceWatermarkTo,
-        ReadOnlyCollection<PartyOpenItemSourceFact> openItems)
+        ReadOnlyCollection<PartyOpenItemSourceFact> openItems,
+        ReadOnlyCollection<PartyReportPostingLineageFact> postingLineage)
     {
         TenantId = tenantId; CompanyId = companyId; PartyAccountId = partyAccountId;
         ControlAccountId = controlAccountId; BalanceSide = balanceSide; Currency = currency;
@@ -54,8 +65,9 @@ public sealed class PartyReportSourceBatch
         SourceChecksumSha256 = ComputeChecksum(
             tenantId, companyId, partyAccountId, controlAccountId, balanceSide, currency,
             effectiveAsOf, recordedCutoff, openingExposure, sourceWatermarkFrom,
-            sourceWatermarkTo, openItems);
+            sourceWatermarkTo, openItems, postingLineage);
         OpenItems = openItems;
+        PostingLineage = postingLineage;
     }
 
     public Guid TenantId { get; }
@@ -71,13 +83,15 @@ public sealed class PartyReportSourceBatch
     public string SourceWatermarkTo { get; }
     public string SourceChecksumSha256 { get; }
     public IReadOnlyList<PartyOpenItemSourceFact> OpenItems { get; }
+    public IReadOnlyList<PartyReportPostingLineageFact> PostingLineage { get; }
 
     public static PartyReportSourceBatch Create(
         Guid tenantId, Guid companyId, Guid partyAccountId, Guid controlAccountId,
         PartyReportBalanceSide balanceSide, string currency, DateOnly effectiveAsOf,
         DateTimeOffset recordedCutoff, decimal openingExposure, string sourceWatermarkFrom,
         string sourceWatermarkTo,
-        IEnumerable<PartyOpenItemSourceFact?>? openItems)
+        IEnumerable<PartyOpenItemSourceFact?>? openItems,
+        IEnumerable<PartyReportPostingLineageFact?>? postingLineage)
     {
         RequireId(tenantId, nameof(tenantId)); RequireId(companyId, nameof(companyId));
         RequireId(partyAccountId, nameof(partyAccountId)); RequireId(controlAccountId, nameof(controlAccountId));
@@ -99,9 +113,45 @@ public sealed class PartyReportSourceBatch
         PartyOpenItemSourceFact[] validated = supplied
             .Select(item => item with { Impacts = Array.AsReadOnly(item.Impacts.ToArray()) })
             .ToArray();
+        ArgumentNullException.ThrowIfNull(postingLineage);
+        PartyReportPostingLineageFact?[] lineageCopy = postingLineage.ToArray();
+        if (lineageCopy.Any(item => item is null))
+            throw new ArgumentException("Posting lineage cannot contain null.", nameof(postingLineage));
+        PartyReportPostingLineageFact[] validatedLineage = lineageCopy
+            .Cast<PartyReportPostingLineageFact>()
+            .ToArray();
+        if (validatedLineage.Select(item => item.JournalId).Distinct().Count() != validatedLineage.Length)
+            throw new ArgumentException("Posting journal IDs must be unique.", nameof(postingLineage));
+        if (validatedLineage
+            .Select(item => (item.SourceType, item.SourceEventId, item.SourceVersion, item.PostingPurpose))
+            .Distinct()
+            .Count() != validatedLineage.Length)
+            throw new ArgumentException("Posting source identities must be unique.", nameof(postingLineage));
+        foreach (PartyReportPostingLineageFact lineage in validatedLineage)
+            ValidateLineage(lineage, effectiveAsOf, recordedCutoff);
         return new PartyReportSourceBatch(tenantId, companyId, partyAccountId, controlAccountId,
             balanceSide, currency, effectiveAsOf, recordedCutoff, openingExposure, from, to,
-            Array.AsReadOnly(validated));
+            Array.AsReadOnly(validated), Array.AsReadOnly(validatedLineage));
+    }
+
+    private static void ValidateLineage(
+        PartyReportPostingLineageFact lineage,
+        DateOnly effectiveAsOf,
+        DateTimeOffset cutoff)
+    {
+        RequireId(lineage.JournalId, nameof(lineage.JournalId));
+        RequireId(lineage.SourceEventId, nameof(lineage.SourceEventId));
+        RequireText(lineage.SourceType, nameof(lineage.SourceType));
+        RequireText(lineage.PostingPurpose, nameof(lineage.PostingPurpose));
+        if (lineage.SourceVersion <= 0 || lineage.EffectiveDate == default ||
+            lineage.EffectiveDate > effectiveAsOf || lineage.RecordedAt.Offset != TimeSpan.Zero ||
+            lineage.PostedAt.Offset != TimeSpan.Zero || lineage.RecordedAt > cutoff ||
+            lineage.PostedAt > cutoff)
+        {
+            throw new ArgumentException(
+                "Posting lineage is outside the requested cut or invalid.",
+                nameof(lineage));
+        }
     }
 
     private static void ValidateItem(PartyOpenItemSourceFact item, DateOnly effectiveAsOf, DateTimeOffset cutoff)
@@ -144,7 +194,8 @@ public sealed class PartyReportSourceBatch
         Guid tenantId, Guid companyId, Guid partyAccountId, Guid controlAccountId,
         PartyReportBalanceSide balanceSide, string currency, DateOnly effectiveAsOf,
         DateTimeOffset recordedCutoff, decimal openingExposure, string watermarkFrom,
-        string watermarkTo, IEnumerable<PartyOpenItemSourceFact> openItems)
+        string watermarkTo, IEnumerable<PartyOpenItemSourceFact> openItems,
+        IEnumerable<PartyReportPostingLineageFact> postingLineage)
     {
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         void Add(string value)
@@ -154,7 +205,7 @@ public sealed class PartyReportSourceBatch
             hash.AppendData(":"u8);
             hash.AppendData(bytes);
         }
-        Add("party-report-source-v1"); Add(tenantId.ToString("N")); Add(companyId.ToString("N"));
+        Add("party-report-source-v2"); Add(tenantId.ToString("N")); Add(companyId.ToString("N"));
         Add(partyAccountId.ToString("N")); Add(controlAccountId.ToString("N"));
         Add(((int)balanceSide).ToString(CultureInfo.InvariantCulture)); Add(currency);
         Add(effectiveAsOf.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
@@ -179,6 +230,21 @@ public sealed class PartyReportSourceBatch
                 Add(impact.RecordedAt.ToString("O", CultureInfo.InvariantCulture));
                 Add(impact.ReversesEventId?.ToString("N") ?? string.Empty);
             }
+        }
+        foreach (PartyReportPostingLineageFact lineage in postingLineage
+                     .OrderBy(item => item.SourceType, StringComparer.Ordinal)
+                     .ThenBy(item => item.SourceEventId)
+                     .ThenBy(item => item.SourceVersion)
+                     .ThenBy(item => item.PostingPurpose, StringComparer.Ordinal)
+                     .ThenBy(item => item.JournalId))
+        {
+            Add(lineage.JournalId.ToString("N")); Add(lineage.SourceType);
+            Add(lineage.SourceEventId.ToString("N"));
+            Add(lineage.SourceVersion.ToString(CultureInfo.InvariantCulture));
+            Add(lineage.PostingPurpose);
+            Add(lineage.EffectiveDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            Add(lineage.RecordedAt.ToString("O", CultureInfo.InvariantCulture));
+            Add(lineage.PostedAt.ToString("O", CultureInfo.InvariantCulture));
         }
         return Convert.ToHexStringLower(hash.GetHashAndReset());
     }

@@ -51,6 +51,7 @@ The payment object is a validated technical draft, not proof of posting or bank 
 - Real PostgreSQL migration idempotency and tenant/company RLS checks passed; Keycloak permission-scope smoke, isolated restore/migration/scope/outbox/auth smoke and Android lint/unit/instrumentation build gates passed.
 - Windows Application Control rejected newly generated standalone quality/migrator DLLs with `0x800711C7`. The security policy was not weakened: Treasury and Accounting checks, plus the same migrator source and embedded SQL, execute through the established allowed quality harnesses while the standalone module and migrator artifacts still build independently.
 - Full `scripts/verify.ps1` completed successfully after the stopped local Docker Desktop service was restarted.
+- The 2 September 2026 MP-03 closing rerun applied migration `0042` once and then zero times, passed the populated and empty PostgreSQL/RLS suites, and reproduced the payment/reconciliation currency snapshots through the isolated restore smoke.
 - No real FX, payment lifecycle, bank settlement, allocation or GL-posting policy was inferred or implemented.
 - No commit, push or PR was created, per user instruction.
 
@@ -61,3 +62,13 @@ The payment object is a validated technical draft, not proof of posting or bank 
 - Persistent idempotency requires PostgreSQL unique constraints and transaction-level concurrency tests.
 - Allocation/GL integration requires published contracts and application orchestration in the same authoritative transaction boundary.
 - Per user instruction, this local slice will not be committed, pushed or opened as a PR until explicitly requested.
+
+## 1 Eylül 2026 multi-currency continuation
+
+`DEC-MP01-004`–`006` sonrasında önceki same-currency teknik sınır kaldırıldı. `PaymentRateSnapshot`, TRY/USD/EUR/GBP işlem parası ile TRY functional para arasındaki günlük company-effective rate kimliği/sürümü, effective rate tarihi ve `MidpointRounding.AwayFromZero` policy kimliği/sürümünü taşır. Functional tutar caller beyanı olarak kabul edilmez; işlem tutarı immutable rate oranından 12 haneli unrounded kanıt ve seçili scale ile deterministik yeniden hesaplanır. Saklanan functional tutar veya residual bu kanıtla exact eşleşmezse domain/loader fail-closed durur.
+
+`0042_payment_currency_conversion_snapshot`, uygulanmış `0022` değiştirilmeden expand/backfill/constraint yaklaşımıyla rounding policy, unrounded functional amount ve explicit rounding difference alanlarını ekler. Eski identity-rate kayıtları kendi rate kimliğiyle legacy rounding snapshot'a backfill edilir; yeni DB guard currency eşitliği ve 1:1 rate zorunluluğunu kaldırırken positive amount, effective-date rate, AwayFromZero policy ve deterministic conversion cross-foot'unu zorunlu tutar. Runtime tablo yetkileri genişletilmez; kayıt append-only kalır.
+
+Treasury Domain, Infrastructure, Migrator, Unit, Integration ve Architecture hedefleri `0 warning / 0 error` derlendi; `git diff --check` içerik hatası bulmadı. Gerçek PostgreSQL migration/backfill/tamper/idempotency testi, kullanıcı kararlı test kadansı uyarınca MP validating paketine bırakıldı. Takip reconciliation dilimi payment-date functional/rate kanıtını statement-date rate ile birleştirerek mapped realized gain/loss satırını ekledi; gerçek DB golden kanıtı MP validating'de açıktır.
+
+2 Eylül 2026 MP-validating sonucu: `0042` migrator kataloğuna eklendi ve gerçek mevcut DB'de `1/0`, boş DB'de `42/0` migration/idempotency sonucu verdi. Payment persistence, deterministic conversion, RLS/tamper negatifleri ve restore sonrası tekrar birleşik `scripts/verify.ps1` koşusunda geçti. Bu plandaki teknik test borcu kapandı; commit/push kullanıcı talebine kadar yapılmadı.

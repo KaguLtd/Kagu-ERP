@@ -44,6 +44,13 @@ internal sealed class MigrationRunner(string connectionString)
         new("0033_open_item_impact_source_identity_expand", "0033_open_item_impact_source_identity_expand.sql"),
         new("0034_open_item_restriction_event", "0034_open_item_restriction_event.sql"),
         new("0035_open_item_restriction_guard_privilege", "0035_open_item_restriction_guard_privilege.sql"),
+        new("0036_authoritative_aging_policy", "0036_authoritative_aging_policy.sql"),
+        new("0037_aging_policy_stream_guard_privilege", "0037_aging_policy_stream_guard_privilege.sql"),
+        new("0038_service_identity_company_permission", "0038_service_identity_company_permission.sql"),
+        new("0039_party_report_refresh_work_item", "0039_party_report_refresh_work_item.sql"),
+        new("0040_party_statement_projection_event_scope", "0040_party_statement_projection_event_scope.sql"),
+        new("0041_reconciliation_approval", "0041_reconciliation_approval.sql"),
+        new("0042_payment_currency_conversion_snapshot", "0042_payment_currency_conversion_snapshot.sql"),
     ];
 
     public async Task<int> RunAsync(CancellationToken cancellationToken)

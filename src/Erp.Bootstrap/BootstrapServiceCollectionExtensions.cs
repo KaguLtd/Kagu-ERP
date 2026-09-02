@@ -1,6 +1,8 @@
 using KaguERP.BuildingBlocks.Application.Audit;
 using KaguERP.BuildingBlocks.Application.Observability;
 using KaguERP.BuildingBlocks.Application.Security;
+using KaguERP.Modules.Reporting.Application.PartyReports;
+using KaguERP.Modules.Reporting.Infrastructure.Persistence;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -23,13 +25,17 @@ public static class BootstrapServiceCollectionExtensions
             services.TryAddScoped<IExecutionScopeResolver, DenyAllExecutionScopeResolver>();
             services.TryAddScoped<IAuthorizationAuditWriter, UnavailableAuthorizationAuditWriter>();
             services.TryAddScoped<IReadinessProbe, UnavailableReadinessProbe>();
+            services.TryAddScoped<IPartyAccountDetailReportQuery, UnavailablePartyAccountDetailReportQuery>();
         }
         else
         {
             services.TryAddSingleton(_ => NpgsqlDataSource.Create(connectionString));
+            services.TryAddSingleton<AppendPartyReportAudit>(
+                _ => PostgresAuthorizationAuditWriter.AppendAsync);
             services.TryAddScoped<IExecutionScopeResolver, PostgresExecutionScopeResolver>();
             services.TryAddScoped<IAuthorizationAuditWriter, PostgresAuthorizationAuditWriter>();
             services.TryAddScoped<IReadinessProbe, PostgresReadinessProbe>();
+            services.TryAddScoped<IPartyAccountDetailReportQuery, PostgresPartyAccountDetailReportQuery>();
         }
 
         return services;

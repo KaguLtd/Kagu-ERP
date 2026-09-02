@@ -9,7 +9,7 @@ namespace KaguERP.Modules.Accounting.Infrastructure.Persistence;
 
 public static class PostgresPostedJournalWriter
 {
-    public static async ValueTask<PostedJournalPersistenceResult> PersistAsync(
+    public static ValueTask<PostedJournalPersistenceResult> PersistAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         ExecutionScope scope,
@@ -20,6 +20,38 @@ public static class PostgresPostedJournalWriter
         ApprovalCompletionEvidence approval,
         ValidatedPeriodLockSet periodLocks,
         DateTimeOffset postedAt,
+        CancellationToken cancellationToken = default) =>
+        PersistAsync(
+            connection,
+            transaction,
+            scope,
+            journalId,
+            persistedDraft,
+            draft,
+            sourceVersion,
+            approval,
+            ApprovalSubjectReference.Create(
+                draft.TenantId,
+                draft.CompanyId,
+                draft.SourceType,
+                draft.SourceEventId,
+                sourceVersion),
+            periodLocks,
+            postedAt,
+            cancellationToken);
+
+    public static async ValueTask<PostedJournalPersistenceResult> PersistAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        ExecutionScope scope,
+        Guid journalId,
+        ValidatedJournalDraftPersistenceResult persistedDraft,
+        ValidatedJournalDraft draft,
+        long sourceVersion,
+        ApprovalCompletionEvidence approval,
+        ApprovalSubjectReference approvalSubject,
+        ValidatedPeriodLockSet periodLocks,
+        DateTimeOffset postedAt,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
@@ -28,6 +60,7 @@ public static class PostgresPostedJournalWriter
         ArgumentNullException.ThrowIfNull(persistedDraft);
         ArgumentNullException.ThrowIfNull(draft);
         ArgumentNullException.ThrowIfNull(approval);
+        ArgumentNullException.ThrowIfNull(approvalSubject);
         ArgumentNullException.ThrowIfNull(periodLocks);
         if (!ReferenceEquals(transaction.Connection, connection))
         {
@@ -56,8 +89,18 @@ public static class PostgresPostedJournalWriter
                 "POSTED_JOURNAL_DRAFT_MISMATCH",
                 "The persisted draft fingerprint does not match the validated journal draft.");
         }
+        if (approvalSubject.TenantId != draft.TenantId || approvalSubject.CompanyId != draft.CompanyId)
+        {
+            throw new PostedJournalPersistenceException(
+                "POSTED_JOURNAL_APPROVAL_SCOPE_MISMATCH",
+                "The approval subject must remain in the journal tenant and company scope.");
+        }
         approval.EnsureSubject(
-            draft.TenantId, draft.CompanyId, draft.SourceType, draft.SourceEventId, sourceVersion);
+            approvalSubject.TenantId,
+            approvalSubject.CompanyId,
+            approvalSubject.SubjectType,
+            approvalSubject.SubjectId,
+            approvalSubject.SubjectVersion);
         if (periodLocks.TenantId != draft.TenantId || periodLocks.CompanyId != draft.CompanyId)
         {
             throw new PostedJournalPersistenceException(

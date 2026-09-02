@@ -19,6 +19,8 @@ using ReportingControlAccounts = KaguERP.Modules.Reporting.Domain.ControlAccount
 using ReportingParty = KaguERP.Modules.Reporting.Domain.PartyReports;
 using TreasuryPayments = KaguERP.Modules.Treasury.Domain.Payments;
 using TreasuryReconciliation = KaguERP.Modules.Treasury.Domain.Reconciliation;
+using TreasuryReconciliationApplication = KaguERP.Modules.Treasury.Application.Reconciliation;
+using TreasuryReconciliationContracts = KaguERP.Modules.Treasury.Contracts.Reconciliation;
 using TreasuryStatements = KaguERP.Modules.Treasury.Domain.Statements;
 
 var checks = new (string Name, Action Run)[]
@@ -70,6 +72,8 @@ var checks = new (string Name, Action Run)[]
     ("BNK-STMT-001 normalized statement-line boundaries", StatementLineBoundariesAreEnforced),
     ("BNK-INV-003 statement-line deduplication", StatementLineUniquenessAndImmutabilityAreEnforced),
     ("BNK-REC-001/002 many-to-many reconciliation proposal", ReconciliationProposalBoundariesAreEnforced),
+    ("BNK-REC-003 zero-tolerance approved reconciliation", ReconciliationApprovalBoundariesAreEnforced),
+    ("BNK-REC-003 statement-dated reconciliation transit journals", ReconciliationTransitJournalsAreExact),
     ("RPT-INV-001 versioned report slice boundaries", FinancialReportSliceBoundariesAreEnforced),
     ("RPT-CTRL-002 exact balance cross-foot", ControlAccountBalanceCrossFootIsEnforced),
     ("RPT-CTRL-001 exact reconciliation context", ControlAccountReconciliationContextIsEnforced),
@@ -79,6 +83,8 @@ var checks = new (string Name, Action Run)[]
     ("RPT-PARTY-002 statement-aging exact cross-foot", PartyStatementAgingCrossFootIsEnforced),
     ("RPT-PARTY source contract bitemporal boundaries", PartyReportSourceContractBoundariesAreEnforced),
     ("RPT-PARTY source projection exact cross-foot", PartyReportSourceProjectionCrossFootIsEnforced),
+    ("RPT-OPS-001 refresh request canonical identity", PartyReportRefreshRequestIsCanonical),
+    ("RPT-OPS-001 refresh request schedule boundaries", PartyReportRefreshRequestBoundariesAreEnforced),
     ("MP-03 golden receivable-to-report exact cross-foot", GoldenPartyCollectionCycleCrossFootIsExact),
     ("API-003 authorized journal posting candidate", AuthorizedPostingCandidateRequiresCompleteEvidence),
     ("API-003 journal posting permission and scope", PostingCandidatePermissionAndScopeFailClosed),
@@ -86,7 +92,244 @@ var checks = new (string Name, Action Run)[]
     ("WFL-INV-002 approval exact subject version", ApprovalEvidenceBindsExactSubjectVersion),
     ("WFL-INV-003 approval maker-checker", ApprovalEvidenceRejectsMakerCheckerConflict),
     ("Workflow distinct-person quorum", ApprovalEvidenceRequiresDistinctQuorum),
+    ("INV-INV-001 numeric(20,6) quantity boundaries", InventoryDomainChecks.QuantityBoundariesAreEnforced),
+    ("INV-MOV-001 scoped signed stock movement", InventoryDomainChecks.StockMovementBoundariesAreEnforced),
+    ("INV-TRF-001 immediate transfer quantity conservation", InventoryDomainChecks.ImmediateTransferConservesQuantity),
+    ("INV-BKD-001 complete backdate impact preview", InventoryDomainChecks.BackdateImpactPreviewIsComplete),
+    ("INV-MST-001 scoped item and base UOM definition", InventoryDomainChecks.ItemMasterBoundariesAreEnforced),
 };
+
+static void ReconciliationTransitJournalsAreExact()
+{
+    Guid tenantId = Guid.NewGuid();
+    Guid companyId = Guid.NewGuid();
+    Guid reconciliationId = Guid.NewGuid();
+    Guid treasuryAccountId = Guid.NewGuid();
+    Guid bankAccountId = Guid.NewGuid();
+    Guid incomingTransitAccountId = Guid.NewGuid();
+    Guid outgoingTransitAccountId = Guid.NewGuid();
+    Guid realizedFxGainAccountId = Guid.NewGuid();
+    Guid realizedFxLossAccountId = Guid.NewGuid();
+    Guid incomingStatementId = Guid.NewGuid();
+    Guid outgoingStatementId = Guid.NewGuid();
+    Guid incomingPaymentA = Guid.NewGuid();
+    Guid incomingPaymentB = Guid.NewGuid();
+    Guid outgoingPayment = Guid.NewGuid();
+    DateTimeOffset recordedAt = new(2026, 8, 31, 12, 0, 0, TimeSpan.Zero);
+    AccountingCurrencies.RoundingPolicySnapshot Rounding(Guid targetCompanyId) =>
+        AccountingCurrencies.RoundingPolicySnapshot.Create(
+            tenantId, targetCompanyId, Guid.NewGuid(), 1, 2, AccountingCurrencies.RoundingMode.AwayFromZero);
+    AccountingCurrencies.ExchangeRateSnapshot Rate(
+        DateOnly date, Guid targetCompanyId, string transactionCurrency, decimal numerator) =>
+        AccountingCurrencies.ExchangeRateSnapshot.Create(
+            tenantId, targetCompanyId, Guid.NewGuid(), 1,
+            CurrencyCode.Create(transactionCurrency), CurrencyCode.Create("TRY"),
+            "company_effective", "manual-daily", date, numerator, 1m);
+    AccountingApplication.ReconciliationTransitCurrencyContext CurrencyContext(
+        DateOnly date, string transactionCurrency = "TRY", decimal numerator = 1m, Guid? contextCompanyId = null)
+    {
+        Guid targetCompanyId = contextCompanyId ?? companyId;
+        return AccountingApplication.ReconciliationTransitCurrencyContext.Create(
+            date, Rate(date, targetCompanyId, transactionCurrency, numerator), Rounding(targetCompanyId),
+            Rate(date, targetCompanyId, "TRY", 1m), Rounding(targetCompanyId));
+    }
+    TreasuryReconciliationContracts.ReconciliationTransitPaymentRateEvidence PaymentRate(
+        string transactionCurrency = "TRY", decimal numerator = 1m, DateOnly? date = null) =>
+        TreasuryReconciliationContracts.ReconciliationTransitPaymentRateEvidence.Create(
+            tenantId, companyId, Guid.NewGuid(), 1, transactionCurrency, "TRY",
+            "company_effective", "manual-daily", date ?? new DateOnly(2026, 8, 24),
+            numerator, 1m, Guid.NewGuid(), 1, 2, 2);
+    TreasuryReconciliationContracts.ReconciliationTransitPaymentMatch Match(
+        Guid paymentId, decimal amount, TreasuryReconciliationContracts.ReconciliationTransitPaymentRateEvidence? rate = null) =>
+        TreasuryReconciliationContracts.ReconciliationTransitPaymentMatch.Create(
+            paymentId, amount, amount, (rate ?? PaymentRate()).CalculateFunctional(amount), rate ?? PaymentRate());
+
+    TreasuryReconciliationContracts.ReconciliationTransitStatementFact incoming =
+        TreasuryReconciliationContracts.ReconciliationTransitStatementFact.Create(
+            incomingStatementId,
+            new DateOnly(2026, 8, 28),
+            TreasuryReconciliationContracts.ReconciliationTransitDirection.Incoming,
+            100m,
+            [
+                Match(incomingPaymentA, 60m),
+                Match(incomingPaymentB, 40m),
+            ]);
+    TreasuryReconciliationContracts.ReconciliationTransitStatementFact outgoing =
+        TreasuryReconciliationContracts.ReconciliationTransitStatementFact.Create(
+            outgoingStatementId,
+            new DateOnly(2026, 8, 29),
+            TreasuryReconciliationContracts.ReconciliationTransitDirection.Outgoing,
+            75m,
+            [Match(outgoingPayment, 75m)]);
+    TreasuryReconciliationContracts.ApprovedReconciliationTransitPostingBatch batch =
+        TreasuryReconciliationContracts.ApprovedReconciliationTransitPostingBatch.Create(
+            tenantId,
+            companyId,
+            reconciliationId,
+            treasuryAccountId,
+            "TRY",
+            recordedAt,
+            [outgoing, incoming]);
+    AccountingApplication.ReconciliationTransitAccountMapping mapping =
+        AccountingApplication.ReconciliationTransitAccountMapping.Create(
+            tenantId,
+            companyId,
+            treasuryAccountId,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            bankAccountId,
+            incomingTransitAccountId,
+            outgoingTransitAccountId,
+            realizedFxGainAccountId,
+            realizedFxLossAccountId,
+            [CurrencyContext(new DateOnly(2026, 8, 28)), CurrencyContext(new DateOnly(2026, 8, 29))]);
+
+    IReadOnlyList<AccountingApplication.ReconciliationTransitJournalSource> sources =
+        AccountingApplication.ReconciliationTransitJournalFactory.Create(batch, mapping);
+    Equal(2, sources.Count, "Approved statement facts did not produce one journal per statement line.");
+    AccountingApplication.ReconciliationTransitJournalSource incomingSource = sources[0];
+    Equal(incomingStatementId, incomingSource.StatementLineId, "Statement booking-date ordering changed.");
+    Equal(new DateOnly(2026, 8, 28), incomingSource.Source.Draft.EffectiveDate,
+        "Incoming journal did not retain the statement booking date.");
+    Equal(100m, incomingSource.Source.Draft.TotalDebit, "Incoming journal debit total changed.");
+    Equal(100m, incomingSource.Source.Draft.TotalCredit, "Incoming journal credit total changed.");
+    Equal(1, incomingSource.Source.Draft.Lines.Count(line =>
+        line.AccountId == bankAccountId && line.Amount.Debit == 100m && line.SourceLineId == incomingStatementId),
+        "Incoming statement did not debit bank control exactly once.");
+    Equal(2, incomingSource.Source.Draft.Lines.Count(line => line.AccountId == incomingTransitAccountId),
+        "Incoming payment drill-down lines were not credited to transit.");
+    Equal(reconciliationId, incomingSource.ApprovalSubject.SubjectId,
+        "Transit journal lost the approved reconciliation subject.");
+    Equal(TreasuryReconciliationContracts.ApprovedReconciliationTransitPostingBatch.ApprovalSubjectType,
+        incomingSource.ApprovalSubject.SubjectType,
+        "Transit journal approval subject type changed.");
+
+    AccountingApplication.ReconciliationTransitJournalSource outgoingSource = sources[1];
+    Equal(new DateOnly(2026, 8, 29), outgoingSource.Source.Draft.EffectiveDate,
+        "Outgoing journal did not retain the statement booking date.");
+    Equal(75m, outgoingSource.Source.Draft.Lines.Single(line => line.AccountId == outgoingTransitAccountId).Amount.Debit,
+        "Outgoing payment did not debit outgoing transit.");
+    Equal(75m, outgoingSource.Source.Draft.Lines.Single(line => line.AccountId == bankAccountId).Amount.Credit,
+        "Outgoing statement did not credit bank control.");
+    Equal(outgoingPayment,
+        outgoingSource.Source.Draft.Lines.Single(line => line.AccountId == outgoingTransitAccountId).SourceLineId,
+        "Outgoing transit line lost payment drill-down identity.");
+
+    DateOnly fxStatementDate = new(2026, 8, 30);
+    Guid fxPaymentId = Guid.NewGuid();
+    TreasuryReconciliationContracts.ReconciliationTransitPaymentRateEvidence paymentRate =
+        PaymentRate("USD", 35m, new DateOnly(2026, 8, 27));
+    TreasuryReconciliationContracts.ApprovedReconciliationTransitPostingBatch fxBatch =
+        TreasuryReconciliationContracts.ApprovedReconciliationTransitPostingBatch.Create(
+            tenantId, companyId, Guid.NewGuid(), treasuryAccountId, "USD", recordedAt,
+            [TreasuryReconciliationContracts.ReconciliationTransitStatementFact.Create(
+                Guid.NewGuid(), fxStatementDate,
+                TreasuryReconciliationContracts.ReconciliationTransitDirection.Incoming, 10m,
+                [Match(fxPaymentId, 10m, paymentRate)])]);
+    AccountingApplication.ReconciliationTransitAccountMapping fxMapping =
+        AccountingApplication.ReconciliationTransitAccountMapping.Create(
+            tenantId, companyId, treasuryAccountId, Guid.NewGuid(), Guid.NewGuid(),
+            bankAccountId, incomingTransitAccountId, outgoingTransitAccountId,
+            realizedFxGainAccountId, realizedFxLossAccountId,
+            [CurrencyContext(fxStatementDate, "USD", 36m)]);
+    ValidatedJournalDraft fxDraft = AccountingApplication.ReconciliationTransitJournalFactory
+        .Create(fxBatch, fxMapping).Single().Source.Draft;
+    Equal(360m, fxDraft.Lines.Single(line => line.AccountId == bankAccountId).Amount.Debit,
+        "Statement-date bank functional amount changed.");
+    Equal(350m, fxDraft.Lines.Single(line => line.AccountId == incomingTransitAccountId).Amount.Credit,
+        "Payment-date transit functional amount changed.");
+    Equal(10m, fxDraft.Lines.Single(line => line.AccountId == realizedFxGainAccountId).Amount.Credit,
+        "Incoming realized FX gain was not separated.");
+    Equal(fxDraft.TotalDebit, fxDraft.TotalCredit, "FX transit journal is not exactly balanced.");
+
+    TreasuryReconciliationContracts.TreasuryPostingContractException totalMismatch =
+        Throws<TreasuryReconciliationContracts.TreasuryPostingContractException>(() =>
+            TreasuryReconciliationContracts.ReconciliationTransitStatementFact.Create(
+                Guid.NewGuid(),
+                new DateOnly(2026, 8, 30),
+                TreasuryReconciliationContracts.ReconciliationTransitDirection.Incoming,
+                10m,
+                [Match(Guid.NewGuid(), 9m)]));
+    Equal("RECONCILIATION_TRANSIT_STATEMENT_TOTAL_MISMATCH", totalMismatch.Code,
+        "Inexact transit statement total was accepted.");
+
+    Guid otherCompanyId = Guid.NewGuid();
+    AccountingApplication.ReconciliationTransitPostingException scopeMismatch =
+        Throws<AccountingApplication.ReconciliationTransitPostingException>(() =>
+            AccountingApplication.ReconciliationTransitJournalFactory.Create(
+                batch,
+                AccountingApplication.ReconciliationTransitAccountMapping.Create(
+                    tenantId,
+                    otherCompanyId,
+                    treasuryAccountId,
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    bankAccountId,
+                    incomingTransitAccountId,
+                    outgoingTransitAccountId,
+                    realizedFxGainAccountId,
+                    realizedFxLossAccountId,
+                    [
+                        CurrencyContext(new DateOnly(2026, 8, 28), contextCompanyId: otherCompanyId),
+                        CurrencyContext(new DateOnly(2026, 8, 29), contextCompanyId: otherCompanyId),
+                    ])));
+    Equal("RECONCILIATION_TRANSIT_MAPPING_SCOPE_MISMATCH", scopeMismatch.Code,
+        "Cross-company transit mapping was accepted.");
+}
+
+static void PartyReportRefreshRequestIsCanonical()
+{
+    Guid tenantId = Guid.NewGuid();
+    Guid companyId = Guid.NewGuid();
+    Guid partyAccountId = Guid.NewGuid();
+    DateTimeOffset cutoff = new(2026, 8, 30, 12, 0, 0, TimeSpan.Zero);
+    ReportingApplication.PartyReportRefreshRequest first = ReportingApplication.PartyReportRefreshRequest.Create(
+        tenantId, companyId, partyAccountId, "party.account.detail", 1,
+        new DateOnly(2026, 8, 30), cutoff,
+        Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+        cutoff.AddMinutes(1), " scheduled-refresh ", cutoff,
+        "Europe/Nicosia", "kagu-default", "run-once");
+    ReportingApplication.PartyReportRefreshRequest replay = ReportingApplication.PartyReportRefreshRequest.Create(
+        tenantId, companyId, partyAccountId, first.ReportCode, first.ReportDefinitionVersion,
+        first.EffectiveAsOf, first.RecordedCutoff, first.ProjectionGenerationId, first.StatementId,
+        first.AgingReportId, first.PartyCrossFootId, first.ControlAccountReconciliationId,
+        first.GeneratedAt, first.GenerationReason, first.ScheduledFor, first.TimezoneName,
+        first.BusinessCalendarCode, first.MissedRunPolicy);
+    Equal(first.ComputeFingerprintSha256(), replay.ComputeFingerprintSha256(),
+        "Equivalent refresh payloads did not produce the same canonical fingerprint.");
+    Equal(64, first.ComputeFingerprintSha256().Length,
+        "Refresh fingerprint is not a SHA-256 hexadecimal value.");
+    ReportingApplication.PartyReportRefreshRequest changed = ReportingApplication.PartyReportRefreshRequest.Create(
+        tenantId, companyId, partyAccountId, first.ReportCode, 2,
+        first.EffectiveAsOf, first.RecordedCutoff, first.ProjectionGenerationId, first.StatementId,
+        first.AgingReportId, first.PartyCrossFootId, first.ControlAccountReconciliationId,
+        first.GeneratedAt, first.GenerationReason, first.ScheduledFor, first.TimezoneName,
+        first.BusinessCalendarCode, first.MissedRunPolicy);
+    Equal(false, string.Equals(
+            first.ComputeFingerprintSha256(),
+            changed.ComputeFingerprintSha256(),
+            StringComparison.Ordinal),
+        "A report-definition version change did not change the refresh fingerprint.");
+}
+
+static void PartyReportRefreshRequestBoundariesAreEnforced()
+{
+    DateTimeOffset utc = new(2026, 8, 30, 12, 0, 0, TimeSpan.Zero);
+    ReportingApplication.PartyReportRefreshRequest Valid(
+        DateTimeOffset? recordedCutoff = null,
+        string missedRunPolicy = "skip") =>
+        ReportingApplication.PartyReportRefreshRequest.Create(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "party.account.detail", 1,
+            new DateOnly(2026, 8, 30), recordedCutoff ?? utc,
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            utc.AddMinutes(1), "scheduled-refresh", utc,
+            "Europe/Nicosia", "kagu-default", missedRunPolicy);
+
+    Equal("skip", Valid().MissedRunPolicy, "Valid missed-run policy changed during normalization.");
+    Throws<ArgumentException>(() => Valid(
+        new DateTimeOffset(2026, 8, 30, 15, 0, 0, TimeSpan.FromHours(3))));
+    Throws<ArgumentException>(() => Valid(missedRunPolicy: "invented"));
+}
 
 static void OpenItemRestrictionEvidenceIsDerivedAsOf()
 {
@@ -158,8 +401,14 @@ static void PartyAccountOpeningBoundariesAreEnforced()
     Guid companyId = Guid.NewGuid();
     Guid openingEventId = Guid.NewGuid();
     Guid partyAccountId = Guid.NewGuid();
+    Guid dueScheduleId = Guid.NewGuid();
+    Guid dueLineId = Guid.NewGuid();
+    Guid paymentTermSnapshotId = Guid.NewGuid();
     DateOnly effectiveDate = new(2026, 1, 1);
     DateTimeOffset recordedAt = new(2026, 8, 27, 9, 0, 0, TimeSpan.Zero);
+    PartyOpenings.PartyAccountOpeningDueLineDraft DueLine(decimal amount = 1000.1234m) =>
+        PartyOpenings.PartyAccountOpeningDueLineDraft.Create(
+            dueLineId, amount, effectiveDate, paymentTermSnapshotId, 1);
 
     PartyOpenings.PartyAccountOpeningDraft valid = PartyOpenings.PartyAccountOpeningDraft.Create(
         tenantId,
@@ -169,7 +418,9 @@ static void PartyAccountOpeningBoundariesAreEnforced()
         PartyOpenings.PartyAccountOpeningEntrySide.Debit,
         1000.1234m,
         effectiveDate,
-        recordedAt);
+        recordedAt,
+        dueScheduleId,
+        [DueLine()]);
     Equal(PartyOpenings.PartyAccountOpeningDraft.SourceType, "party.account-opening",
         "Opening source type is not canonical.");
     Equal(PartyOpenings.PartyAccountOpeningDraft.PostingPurpose, "party.account-opening.post",
@@ -181,28 +432,44 @@ static void PartyAccountOpeningBoundariesAreEnforced()
         "PARTY_OPENING_AMOUNT_INVALID",
         () => PartyOpenings.PartyAccountOpeningDraft.Create(
             tenantId, companyId, openingEventId, partyAccountId,
-            PartyOpenings.PartyAccountOpeningEntrySide.Debit, 0m, effectiveDate, recordedAt));
+            PartyOpenings.PartyAccountOpeningEntrySide.Debit, 0m, effectiveDate, recordedAt,
+            dueScheduleId, [DueLine(1m)]));
     ExpectPartyOpeningInvariant(
         "PARTY_OPENING_AMOUNT_SCALE_INVALID",
         () => PartyOpenings.PartyAccountOpeningDraft.Create(
             tenantId, companyId, openingEventId, partyAccountId,
-            PartyOpenings.PartyAccountOpeningEntrySide.Debit, 1.00001m, effectiveDate, recordedAt));
+            PartyOpenings.PartyAccountOpeningEntrySide.Debit, 1.00001m, effectiveDate, recordedAt,
+            dueScheduleId, [DueLine(1m)]));
     ExpectPartyOpeningInvariant(
         "PARTY_OPENING_ENTRY_SIDE_INVALID",
         () => PartyOpenings.PartyAccountOpeningDraft.Create(
             tenantId, companyId, openingEventId, partyAccountId,
-            (PartyOpenings.PartyAccountOpeningEntrySide)3, 1m, effectiveDate, recordedAt));
+            (PartyOpenings.PartyAccountOpeningEntrySide)3, 1m, effectiveDate, recordedAt,
+            dueScheduleId, [DueLine(1m)]));
     ExpectPartyOpeningInvariant(
         "PARTY_OPENING_EFFECTIVE_DATE_REQUIRED",
         () => PartyOpenings.PartyAccountOpeningDraft.Create(
             tenantId, companyId, openingEventId, partyAccountId,
-            PartyOpenings.PartyAccountOpeningEntrySide.Credit, 1m, default, recordedAt));
+            PartyOpenings.PartyAccountOpeningEntrySide.Credit, 1m, default, recordedAt,
+            dueScheduleId, [DueLine(1m)]));
     ExpectPartyOpeningInvariant(
         "PARTY_OPENING_RECORDED_AT_NOT_UTC",
         () => PartyOpenings.PartyAccountOpeningDraft.Create(
             tenantId, companyId, openingEventId, partyAccountId,
             PartyOpenings.PartyAccountOpeningEntrySide.Credit, 1m, effectiveDate,
-            recordedAt.ToOffset(TimeSpan.FromHours(3))));
+            recordedAt.ToOffset(TimeSpan.FromHours(3)), dueScheduleId, [DueLine(1m)]));
+    ExpectPartyOpeningInvariant(
+        "PARTY_OPENING_DUE_LINES_REQUIRED",
+        () => PartyOpenings.PartyAccountOpeningDraft.Create(
+            tenantId, companyId, openingEventId, partyAccountId,
+            PartyOpenings.PartyAccountOpeningEntrySide.Debit, 1m, effectiveDate, recordedAt,
+            dueScheduleId, []));
+    ExpectPartyOpeningInvariant(
+        "PARTY_OPENING_DUE_TOTAL_MISMATCH",
+        () => PartyOpenings.PartyAccountOpeningDraft.Create(
+            tenantId, companyId, openingEventId, partyAccountId,
+            PartyOpenings.PartyAccountOpeningEntrySide.Debit, 2m, effectiveDate, recordedAt,
+            dueScheduleId, [DueLine(1m)]));
 }
 
 static void PartyAccountOpeningPermissionAndScopeFailClosed()
@@ -218,7 +485,10 @@ static void PartyAccountOpeningPermissionAndScopeFailClosed()
         PartyOpenings.PartyAccountOpeningEntrySide.Debit,
         25m,
         new DateOnly(2026, 1, 1),
-        new DateTimeOffset(2026, 8, 27, 9, 0, 0, TimeSpan.Zero));
+        new DateTimeOffset(2026, 8, 27, 9, 0, 0, TimeSpan.Zero),
+        Guid.NewGuid(),
+        [PartyOpenings.PartyAccountOpeningDueLineDraft.Create(
+            Guid.NewGuid(), 25m, new DateOnly(2026, 1, 1), Guid.NewGuid(), 1)]);
 
     var permittedScope = new ExecutionScope(
         tenantId,
@@ -266,7 +536,7 @@ static void PartyReportSourceProjectionCrossFootIsEnforced()
     PartyReportContracts.PartyReportSourceBatch source = PartyReportContracts.PartyReportSourceBatch.Create(
         tenantId, companyId, partyAccountId, controlAccountId,
         PartyReportContracts.PartyReportBalanceSide.Receivable, "GBP", asOf, cutoff, 0m,
-        "event:1", "event:2", [item]);
+        "event:1", "event:2", [item], []);
 
     ReportingParty.ValidatedPartyStatement statement = ReportingApplication.PartyReportProjectionBuilder.BuildStatement(
         source, "party.account.detail", Guid.NewGuid(), 1, Guid.NewGuid(), cutoff.AddMinutes(1));
@@ -285,7 +555,7 @@ static void PartyReportSourceProjectionCrossFootIsEnforced()
         tenantId, companyId, partyAccountId, controlAccountId,
         PartyReportContracts.PartyReportBalanceSide.Receivable, "GBP", asOf, cutoff, 0m,
         "event:1", "event:2",
-        [item with { RestrictionEvidence = PartyReportContracts.PartyReportRestrictionEvidence.Clear }]);
+        [item with { RestrictionEvidence = PartyReportContracts.PartyReportRestrictionEvidence.Clear }], []);
     ReportingParty.ValidatedPartyAgingReport aging = ReportingApplication.PartyReportProjectionBuilder.BuildAging(
         clearSource, policy, "party.account.detail", Guid.NewGuid(), 1, Guid.NewGuid(), cutoff.AddMinutes(1));
     Equal(40m, aging.TotalRemaining, "Aging total did not preserve the source remaining amount.");
@@ -303,7 +573,7 @@ static void PartyReportSourceProjectionCrossFootIsEnforced()
     PartyReportContracts.PartyReportSourceBatch inconsistent = PartyReportContracts.PartyReportSourceBatch.Create(
         tenantId, companyId, partyAccountId, controlAccountId,
         PartyReportContracts.PartyReportBalanceSide.Receivable, "GBP", asOf, cutoff, 0m,
-        "event:1", "event:2", [item with { RemainingAmount = 39m }]);
+        "event:1", "event:2", [item with { RemainingAmount = 39m }], []);
     ReportingControlAccounts.ReportingInvariantException mismatch = Throws<ReportingControlAccounts.ReportingInvariantException>(() =>
         ReportingApplication.PartyReportProjectionBuilder.BuildStatement(
             inconsistent, "party.account.detail", Guid.NewGuid(), 1, Guid.NewGuid(), cutoff.AddMinutes(1)));
@@ -327,39 +597,39 @@ static void PartyReportSourceContractBoundariesAreEnforced()
     PartyReportContracts.PartyReportSourceBatch batch = PartyReportContracts.PartyReportSourceBatch.Create(
         tenantId, companyId, Guid.NewGuid(), Guid.NewGuid(),
         PartyReportContracts.PartyReportBalanceSide.Receivable, "GBP", asOf, cutoff, 0m,
-        "event:1", "event:2", [item]);
+        "event:1", "event:2", [item], []);
     Equal(PartyReportContracts.PartyReportRestrictionEvidence.Unavailable,
         batch.OpenItems[0].RestrictionEvidence,
         "Unavailable dispute/block evidence was silently converted to clear.");
     PartyReportContracts.PartyReportSourceBatch replay = PartyReportContracts.PartyReportSourceBatch.Create(
         batch.TenantId, batch.CompanyId, batch.PartyAccountId, batch.ControlAccountId,
         batch.BalanceSide, batch.Currency, batch.EffectiveAsOf, batch.RecordedCutoff,
-        batch.OpeningExposure, batch.SourceWatermarkFrom, batch.SourceWatermarkTo, [item]);
+        batch.OpeningExposure, batch.SourceWatermarkFrom, batch.SourceWatermarkTo, [item], []);
     Equal(batch.SourceChecksumSha256, replay.SourceChecksumSha256,
         "Equivalent source facts did not produce a deterministic checksum.");
     Equal(64, batch.SourceChecksumSha256.Length, "Source checksum is not SHA-256 length.");
     PartyReportContracts.PartyReportSourceBatch changedWatermark = PartyReportContracts.PartyReportSourceBatch.Create(
         batch.TenantId, batch.CompanyId, batch.PartyAccountId, batch.ControlAccountId,
         batch.BalanceSide, batch.Currency, batch.EffectiveAsOf, batch.RecordedCutoff,
-        batch.OpeningExposure, batch.SourceWatermarkFrom, "event:3", [item]);
+        batch.OpeningExposure, batch.SourceWatermarkFrom, "event:3", [item], []);
     Equal(false, batch.SourceChecksumSha256 == changedWatermark.SourceChecksumSha256,
         "Changed source lineage reused the same checksum.");
 
     Throws<ArgumentException>(() => PartyReportContracts.PartyReportSourceBatch.Create(
         tenantId, companyId, Guid.NewGuid(), Guid.NewGuid(),
         PartyReportContracts.PartyReportBalanceSide.Receivable, "GBP", asOf,
-        cutoff.ToOffset(TimeSpan.FromHours(3)), 0m, "event:1", "event:2", [item]));
+        cutoff.ToOffset(TimeSpan.FromHours(3)), 0m, "event:1", "event:2", [item], []));
     var lateImpact = impact with { EventId = Guid.NewGuid(), RecordedAt = cutoff.AddSeconds(1) };
     var lateItem = item with { OpenItemId = Guid.NewGuid(), Impacts = [lateImpact] };
     Throws<ArgumentException>(() => PartyReportContracts.PartyReportSourceBatch.Create(
         tenantId, companyId, Guid.NewGuid(), Guid.NewGuid(),
         PartyReportContracts.PartyReportBalanceSide.Receivable, "GBP", asOf, cutoff, 0m,
-        "event:1", "event:2", [lateItem]));
+        "event:1", "event:2", [lateItem], []));
     var lateOrigin = item with { OpenItemId = Guid.NewGuid(), RecordedAt = cutoff.AddSeconds(1) };
     Throws<ArgumentException>(() => PartyReportContracts.PartyReportSourceBatch.Create(
         tenantId, companyId, Guid.NewGuid(), Guid.NewGuid(),
         PartyReportContracts.PartyReportBalanceSide.Receivable, "GBP", asOf, cutoff, 0m,
-        "event:1", "event:2", [lateOrigin]));
+        "event:1", "event:2", [lateOrigin], []));
 }
 
 static void ApprovalEvidenceBindsExactSubjectVersion()
@@ -373,6 +643,18 @@ static void ApprovalEvidenceBindsExactSubjectVersion()
     ApprovalApplication.ApprovalEvidenceException mismatch = Throws<ApprovalApplication.ApprovalEvidenceException>(() =>
         evidence.EnsureSubject(tenantId, companyId, "accounting.journal", subjectId, 4));
     Equal("APPROVAL_SUBJECT_MISMATCH", mismatch.Code, "Changed subject version reused approval evidence.");
+
+    ApprovalApplication.ApprovalSubjectReference separateSubject =
+        ApprovalApplication.ApprovalSubjectReference.Create(
+            tenantId, companyId, "treasury.reconciliation-proposal", Guid.NewGuid(), 1);
+    Equal("treasury.reconciliation-proposal", separateSubject.SubjectType,
+        "Separate approval subject type changed during canonicalization.");
+    ApprovalApplication.ApprovalEvidenceException invalidReference =
+        Throws<ApprovalApplication.ApprovalEvidenceException>(() =>
+            ApprovalApplication.ApprovalSubjectReference.Create(
+                tenantId, companyId, " ", Guid.NewGuid(), 1));
+    Equal("APPROVAL_SUBJECT_REFERENCE_TYPE_INVALID", invalidReference.Code,
+        "Approval subject reference accepted an empty subject type.");
 }
 
 static void ApprovalEvidenceRejectsMakerCheckerConflict()
@@ -522,8 +804,19 @@ static void PostingCandidatePeriodAndDraftEvidenceFailClosed()
     Equal("PERIOD_GL_LOCK_BLOCKS_POSTING", periodException.Code, "Unexpected closed-period failure code.");
 }
 
+var selectedChecks = args.Length == 0
+    ? checks
+    : checks
+        .Where(check => args.Any(filter => check.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)))
+        .ToArray();
+if (selectedChecks.Length == 0)
+{
+    Console.Error.WriteLine($"No domain unit check matched: {string.Join(", ", args)}");
+    return 2;
+}
+
 var failures = new List<string>();
-foreach (var check in checks)
+foreach (var check in selectedChecks)
 {
     try
     {
@@ -546,7 +839,7 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine($"Domain unit checks passed: {checks.Length} checks.");
+Console.WriteLine($"Domain unit checks passed: {selectedChecks.Length} checks.");
 return 0;
 
 static void BalancedJournalIsAccepted()
@@ -1155,17 +1448,28 @@ static void PaymentRateBoundariesAreEnforced()
     ExpectPaymentInvariant("PAYMENT_RATE_NUMERATOR_INVALID", () => CreatePaymentRate(context, numerator: 0m));
     ExpectPaymentInvariant("PAYMENT_RATE_DENOMINATOR_INVALID", () => CreatePaymentRate(context, denominator: -1m));
     ExpectPaymentInvariant(
-        "PAYMENT_CROSS_CURRENCY_NOT_SUPPORTED",
-        () => CreatePaymentRate(context, functionalCurrency: TreasuryPayments.TreasuryCurrencyCode.Create("EUR")));
+        "PAYMENT_ROUNDING_POLICY_REQUIRED",
+        () => CreatePaymentRate(context, roundingPolicyId: Guid.Empty));
     ExpectPaymentInvariant(
-        "PAYMENT_CROSS_CURRENCY_NOT_SUPPORTED",
-        () => CreatePaymentRate(context, numerator: 2m, denominator: 1m));
+        "PAYMENT_ROUNDING_POLICY_VERSION_INVALID",
+        () => CreatePaymentRate(context, roundingPolicyVersion: 0));
+    ExpectPaymentInvariant("PAYMENT_ROUNDING_SCALE_INVALID", () => CreatePaymentRate(context, roundingScale: 5));
 
     var rate = CreatePaymentRate(context, rateType: " identity ", source: " technical-fixture ", numerator: 100m, denominator: 100m);
     Equal("identity", rate.RateType, "Payment-rate type was not canonicalized.");
     Equal("technical-fixture", rate.Source, "Payment-rate source was not canonicalized.");
     Equal(context.Currency, rate.TransactionCurrency, "Payment transaction currency changed.");
     Equal(context.Currency, rate.FunctionalCurrency, "Payment functional currency changed.");
+    TreasuryPayments.PaymentRateSnapshot crossCurrency = CreatePaymentRate(
+        context,
+        transactionCurrency: TreasuryPayments.TreasuryCurrencyCode.Create("USD"),
+        functionalCurrency: TreasuryPayments.TreasuryCurrencyCode.Create("TRY"),
+        numerator: 35.5m,
+        denominator: 1m,
+        roundingScale: 2);
+    TreasuryPayments.PaymentFunctionalAmount converted = crossCurrency.Calculate(10.125m);
+    Equal(359.44m, converted.FunctionalAmount, "Cross-currency payment conversion changed.");
+    Equal(0.0025m, converted.RoundingDifference, "Cross-currency payment residual changed.");
 }
 
 static void PaymentEconomicEventBoundariesAreEnforced()
@@ -1219,13 +1523,36 @@ static void PaymentEconomicEventBoundariesAreEnforced()
         context,
         direction: TreasuryPayments.PaymentDirection.Incoming,
         transactionAmount: 125.4321m,
-        functionalAmount: 125.4321m);
+        functionalAmount: 125.43m);
     Equal(context.TenantId, payment.TenantId, "Payment tenant changed.");
     Equal(context.CompanyId, payment.CompanyId, "Payment company changed.");
     Equal(context.PartyAccountId, payment.PartyAccountId, "Payment party account changed.");
     Equal(context.TreasuryAccountId, payment.TreasuryAccountId, "Payment treasury account changed.");
     Equal(125.4321m, payment.TransactionAmount, "Payment transaction amount changed.");
-    Equal(125.4321m, payment.FunctionalAmount, "Payment functional amount changed.");
+    Equal(125.43m, payment.FunctionalAmount, "Payment functional amount changed.");
+    Equal(payment.FunctionalAmount - payment.UnroundedFunctionalAmount, payment.RoundingDifference,
+        "Payment rounding residual is not reproducible.");
+    TreasuryPayments.PaymentRateSnapshot usdTryRate = CreatePaymentRate(
+        context,
+        transactionCurrency: TreasuryPayments.TreasuryCurrencyCode.Create("USD"),
+        functionalCurrency: TreasuryPayments.TreasuryCurrencyCode.Create("TRY"),
+        numerator: 35.5m,
+        denominator: 1m);
+    TreasuryPayments.ValidatedPaymentEconomicEventDraft foreignPayment = CreatePaymentDraft(
+        context,
+        transactionAmount: 10.125m,
+        functionalAmount: 359.44m,
+        rateSnapshot: usdTryRate);
+    Equal("USD", foreignPayment.RateSnapshot.TransactionCurrency.Value,
+        "Foreign payment transaction currency changed.");
+    Equal("TRY", foreignPayment.RateSnapshot.FunctionalCurrency.Value,
+        "Foreign payment functional currency changed.");
+    ExpectPaymentInvariant(
+        "PAYMENT_RATE_DATE_MISMATCH",
+        () => CreatePaymentDraft(
+            context,
+            effectiveDate: new DateOnly(2026, 8, 25),
+            rateSnapshot: CreatePaymentRate(context)));
     Equal(TimeSpan.Zero, payment.RecordedAt.Offset, "Payment timestamp is not UTC.");
 }
 
@@ -1497,6 +1824,98 @@ static void ReconciliationProposalBoundariesAreEnforced()
     {
         Throws<NotSupportedException>(() => list[0] = first);
     }
+}
+
+static void ReconciliationApprovalBoundariesAreEnforced()
+{
+    var context = CreateStatementTestContext();
+    Guid makerId = Guid.NewGuid();
+    Guid approverId = Guid.NewGuid();
+    var exactStatement = CreateStatementLine(context, signedAmount: -100m);
+    var exactMovement = CreateMovementCapacity(context, usableAmount: 100m);
+    TreasuryReconciliation.ValidatedReconciliationProposal exactProposal = CreateReconciliationProposal(
+        context,
+        [CreateReconciliationMatch(exactStatement, exactMovement, 100m)]);
+    var scope = new ExecutionScope(
+        context.TenantId,
+        Guid.NewGuid(),
+        [new CompanyAccess(
+            context.CompanyId,
+            [TreasuryReconciliationApplication.AuthorizedReconciliationApproval.RequiredPermission])]);
+    ApprovalApplication.ApprovalCompletionEvidence Evidence(
+        TreasuryReconciliation.ValidatedReconciliationProposal proposal,
+        Guid evidenceMakerId,
+        int quorum = 1,
+        params Guid[] approvers) =>
+        ApprovalApplication.ApprovalCompletionEvidence.Create(
+            context.TenantId,
+            context.CompanyId,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            TreasuryReconciliationApplication.AuthorizedReconciliationApproval.ApprovalSubjectType,
+            proposal.ReconciliationId,
+            TreasuryReconciliationApplication.AuthorizedReconciliationApproval.ApprovalSubjectVersion,
+            evidenceMakerId,
+            quorum,
+            approvers.Select((actorId, index) => ApprovalApplication.ApprovalDecisionEvidence.Create(
+                Guid.NewGuid(),
+                actorId,
+                new DateTimeOffset(2026, 8, 31, 10, index, 0, TimeSpan.Zero))));
+
+    TreasuryReconciliationApplication.AuthorizedReconciliationApproval authorized =
+        TreasuryReconciliationApplication.AuthorizedReconciliationApproval.Create(
+            scope,
+            exactProposal,
+            makerId,
+            Evidence(exactProposal, makerId, 1, approverId));
+    Equal(exactProposal, authorized.Proposal, "Authorized reconciliation changed the immutable proposal.");
+    Equal(makerId, authorized.ProposalMakerId, "Authorized reconciliation lost the proposal maker.");
+
+    var statementPartialProposal = CreateReconciliationProposal(
+        context,
+        [CreateReconciliationMatch(
+            CreateStatementLine(context, signedAmount: -100m),
+            CreateMovementCapacity(context, usableAmount: 50m),
+            50m)]);
+    ExpectReconciliationInvariant(
+        "RECONCILIATION_STATEMENT_ZERO_TOLERANCE_NOT_MET",
+        () => statementPartialProposal.EnsureZeroTolerance());
+
+    var movementPartialProposal = CreateReconciliationProposal(
+        context,
+        [CreateReconciliationMatch(
+            CreateStatementLine(context, signedAmount: -100m),
+            CreateMovementCapacity(context, usableAmount: 120m),
+            100m)]);
+    ExpectReconciliationInvariant(
+        "RECONCILIATION_MOVEMENT_ZERO_TOLERANCE_NOT_MET",
+        () => movementPartialProposal.EnsureZeroTolerance());
+
+    var deniedScope = new ExecutionScope(context.TenantId, Guid.NewGuid(), [context.CompanyId]);
+    Throws<TreasuryReconciliationApplication.ReconciliationApprovalAuthorizationException>(() =>
+        TreasuryReconciliationApplication.AuthorizedReconciliationApproval.Create(
+            deniedScope,
+            exactProposal,
+            makerId,
+            Evidence(exactProposal, makerId, 1, approverId)));
+    TreasuryReconciliationApplication.ReconciliationApprovalInvariantException makerMismatch =
+        Throws<TreasuryReconciliationApplication.ReconciliationApprovalInvariantException>(() =>
+            TreasuryReconciliationApplication.AuthorizedReconciliationApproval.Create(
+                scope,
+                exactProposal,
+                makerId,
+                Evidence(exactProposal, Guid.NewGuid(), 1, approverId)));
+    Equal("RECONCILIATION_APPROVAL_MAKER_MISMATCH", makerMismatch.Code,
+        "Reconciliation approval accepted evidence for another maker.");
+    TreasuryReconciliationApplication.ReconciliationApprovalInvariantException quorumMismatch =
+        Throws<TreasuryReconciliationApplication.ReconciliationApprovalInvariantException>(() =>
+            TreasuryReconciliationApplication.AuthorizedReconciliationApproval.Create(
+                scope,
+                exactProposal,
+                makerId,
+                Evidence(exactProposal, makerId, 2, approverId, Guid.NewGuid())));
+    Equal("RECONCILIATION_APPROVAL_QUORUM_INVALID", quorumMismatch.Code,
+        "Reconciliation approval accepted a policy other than one distinct manager.");
 }
 
 static void FinancialReportSliceBoundariesAreEnforced()
@@ -1989,6 +2408,7 @@ static void GoldenPartyCollectionCycleCrossFootIsExact()
         recordedAt: UtcAt(2026, 8, 22),
         sourceType: "treasury.receipt",
         postingPurpose: "party-collection",
+        rateSnapshot: CreatePaymentRate(paymentContext, rateDate: new DateOnly(2026, 8, 22)),
         effectiveDate: new DateOnly(2026, 8, 22));
     var paymentCapacity = PartyAllocations.PaymentAllocationCapacity.Create(
         tenantId,
@@ -3216,7 +3636,7 @@ static TreasuryPaymentTestContext CreateTreasuryPaymentTestContext() =>
         Guid.NewGuid(),
         TreasuryPayments.TreasuryCurrencyCode.Create("GBP"));
 
-static TreasuryPayments.SameCurrencyPaymentRateSnapshot CreatePaymentRate(
+static TreasuryPayments.PaymentRateSnapshot CreatePaymentRate(
     TreasuryPaymentTestContext context,
     long version = 1,
     string rateType = "identity",
@@ -3224,8 +3644,12 @@ static TreasuryPayments.SameCurrencyPaymentRateSnapshot CreatePaymentRate(
     TreasuryPayments.TreasuryCurrencyCode? transactionCurrency = null,
     TreasuryPayments.TreasuryCurrencyCode? functionalCurrency = null,
     decimal numerator = 1m,
-    decimal denominator = 1m) =>
-    TreasuryPayments.SameCurrencyPaymentRateSnapshot.Create(
+    decimal denominator = 1m,
+    Guid? roundingPolicyId = null,
+    long roundingPolicyVersion = 1,
+    int roundingScale = 2,
+    DateOnly? rateDate = null) =>
+    TreasuryPayments.PaymentRateSnapshot.Create(
         context.TenantId,
         context.CompanyId,
         context.RateSnapshotId,
@@ -3234,9 +3658,12 @@ static TreasuryPayments.SameCurrencyPaymentRateSnapshot CreatePaymentRate(
         functionalCurrency ?? context.Currency,
         rateType,
         source,
-        new DateOnly(2026, 8, 24),
+        rateDate ?? new DateOnly(2026, 8, 24),
         numerator,
-        denominator);
+        denominator,
+        roundingPolicyId ?? context.RateSnapshotId,
+        roundingPolicyVersion,
+        roundingScale);
 
 static TreasuryPayments.ValidatedPaymentEconomicEventDraft CreatePaymentDraft(
     TreasuryPaymentTestContext context,
@@ -3248,7 +3675,7 @@ static TreasuryPayments.ValidatedPaymentEconomicEventDraft CreatePaymentDraft(
     string sourceType = "technical.payment-source",
     Guid? sourceEventId = null,
     string postingPurpose = "technical-cash-movement",
-    TreasuryPayments.SameCurrencyPaymentRateSnapshot? rateSnapshot = null,
+    TreasuryPayments.PaymentRateSnapshot? rateSnapshot = null,
     DateOnly? effectiveDate = null) =>
     TreasuryPayments.ValidatedPaymentEconomicEventDraft.Create(
         paymentId ?? Guid.NewGuid(),

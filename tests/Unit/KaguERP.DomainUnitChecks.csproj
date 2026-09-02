@@ -8,11 +8,17 @@
                       ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\Modules\Parties\Parties.Domain\KaguERP.Modules.Parties.Domain.csproj" />
     <ProjectReference Include="..\..\src\Modules\Parties\Parties.Application\KaguERP.Modules.Parties.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Inventory\Inventory.Domain\KaguERP.Modules.Inventory.Domain.csproj"
+                      ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\Modules\Parties\Parties.Contracts\KaguERP.Modules.Parties.Contracts.csproj"
                       ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\Modules\Reporting\Reporting.Domain\KaguERP.Modules.Reporting.Domain.csproj"
                       ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\Modules\Treasury\Treasury.Domain\KaguERP.Modules.Treasury.Domain.csproj"
+                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\Modules\Treasury\Treasury.Application\KaguERP.Modules.Treasury.Application.csproj"
+                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\Modules\Treasury\Treasury.Contracts\KaguERP.Modules.Treasury.Contracts.csproj"
                       ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>
@@ -25,9 +31,18 @@
     <Compile Include="..\..\src\Modules\Parties\Parties.Contracts\**\*.cs"
              Exclude="..\..\src\Modules\Parties\Parties.Contracts\bin\**;..\..\src\Modules\Parties\Parties.Contracts\obj\**"
              LinkBase="Parties.Contracts" />
+    <Compile Include="..\..\src\Modules\Inventory\Inventory.Domain\**\*.cs"
+             Exclude="..\..\src\Modules\Inventory\Inventory.Domain\bin\**;..\..\src\Modules\Inventory\Inventory.Domain\obj\**"
+             LinkBase="Inventory.Domain" />
     <Compile Include="..\..\src\Modules\Treasury\Treasury.Domain\**\*.cs"
              Exclude="..\..\src\Modules\Treasury\Treasury.Domain\bin\**;..\..\src\Modules\Treasury\Treasury.Domain\obj\**"
              LinkBase="Treasury.Domain" />
+    <Compile Include="..\..\src\Modules\Treasury\Treasury.Application\**\*.cs"
+             Exclude="..\..\src\Modules\Treasury\Treasury.Application\bin\**;..\..\src\Modules\Treasury\Treasury.Application\obj\**"
+             LinkBase="Treasury.Application" />
+    <Compile Include="..\..\src\Modules\Treasury\Treasury.Contracts\**\*.cs"
+             Exclude="..\..\src\Modules\Treasury\Treasury.Contracts\bin\**;..\..\src\Modules\Treasury\Treasury.Contracts\obj\**"
+             LinkBase="Treasury.Contracts" />
     <Compile Include="..\..\src\Modules\Reporting\Reporting.Domain\**\*.cs"
              Exclude="..\..\src\Modules\Reporting\Reporting.Domain\bin\**;..\..\src\Modules\Reporting\Reporting.Domain\obj\**"
              LinkBase="Reporting.Domain" />

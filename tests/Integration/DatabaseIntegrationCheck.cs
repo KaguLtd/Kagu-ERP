@@ -26,11 +26,14 @@ using KaguERP.Modules.Parties.Infrastructure.Reports;
 using KaguERP.Modules.Reporting.Application.PartyReports;
 using KaguERP.Modules.Reporting.Domain.ControlAccounts;
 using KaguERP.Modules.Reporting.Domain.PartyReports;
+using KaguERP.Modules.Reporting.Infrastructure.PartyReports;
 using KaguERP.Modules.Reporting.Infrastructure.Persistence;
 using KaguERP.Modules.Treasury.Domain.Payments;
 using KaguERP.Modules.Treasury.Domain.Reconciliation;
 using KaguERP.Modules.Treasury.Domain.Statements;
 using KaguERP.Modules.Treasury.Infrastructure.Persistence;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace KaguERP.DatabaseIntegrationChecks;
@@ -70,6 +73,15 @@ internal static class DatabaseIntegrationCheck
             await AssertDatabaseReadinessAsync(appDataSource);
             await AssertIdentityScopeResolutionAsync(appDataSource, tenantA, companyA1, companyA2, actorId, testSubject);
             await AssertIdentityContextDoesNotLeakAsync(appDataSource, actorId);
+            await AssertPartyReportRefreshWorkQueueAsync(
+                migratorDataSource,
+                appDataSource,
+                migratorConnectionString,
+                appConnectionString,
+                tenantA,
+                companyA1,
+                companyA2,
+                actorId);
             await AssertAuthorizationAuditPersistenceAsync(
                 migratorDataSource,
                 appDataSource,
@@ -176,8 +188,10 @@ internal static class DatabaseIntegrationCheck
                 migratorDataSource, appDataSource, tenantA, companyA1, companyA2, actorId);
             await AssertPartyAccountOpeningPersistenceAsync(
                 migratorDataSource, appDataSource, tenantA, companyA1, companyA2, actorId);
-            await AssertAuthoritativePartyReportSourceAsync(
+            await AssertAuthoritativeAgingPolicySourceAsync(
                 migratorDataSource, appDataSource, tenantA, companyA1, companyA2, actorId);
+            await AssertAuthoritativePartyReportSourceAsync(
+                migratorDataSource, appDataSource, appConnectionString, tenantA, companyA1, companyA2, actorId);
             await AssertPaymentEconomicEventPersistenceAsync(
                 appDataSource, tenantA, companyA1, companyA2, actorId);
             await AssertStatementLinePersistenceAsync(
@@ -769,7 +783,7 @@ internal static class DatabaseIntegrationCheck
         PartyReportSourceBatch sinkSource = PartyReportSourceBatch.Create(
             tenantId, companyId, Guid.CreateVersion7(), Guid.CreateVersion7(),
             PartyReportBalanceSide.Receivable, "GBP", sinkAsOf, sinkCutoff, 0m,
-            "party-event:1", "party-event:2", [sinkItem]);
+            "party-event:1", "party-event:2", [sinkItem], []);
         CalendarDayAgingPolicySnapshot sinkPolicy = CalendarDayAgingPolicySnapshot.Create(
             tenantId, companyId, Guid.CreateVersion7(), 1,
             [CalendarDayAgingBucket.Create("all", int.MinValue, int.MaxValue)]);
@@ -915,6 +929,69 @@ internal static class DatabaseIntegrationCheck
             [(Guid.CreateVersion7(), Guid.CreateVersion7()), (Guid.CreateVersion7(), Guid.CreateVersion7())]);
     }
 
+    private static async Task SeedServiceIdentityAsync(
+        NpgsqlDataSource dataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid serviceActorId,
+        Guid createdBy)
+    {
+        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await ExecuteAsync(connection, transaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+        const string identitySql = """
+            INSERT INTO iam.service_identity
+                (id, tenant_id, identity_code, created_by)
+            VALUES ($1,$2,$3,$4)
+            """;
+        await using (var identity = new NpgsqlCommand(identitySql, connection, transaction))
+        {
+            identity.Parameters.AddWithValue(serviceActorId);
+            identity.Parameters.AddWithValue(tenantId);
+            identity.Parameters.AddWithValue($"party-report-worker-{serviceActorId:N}");
+            identity.Parameters.AddWithValue(createdBy);
+            await identity.ExecuteNonQueryAsync();
+        }
+        const string permissionSql = """
+            INSERT INTO iam.service_identity_company_permission
+                (service_identity_id, tenant_id, company_id, permission_code, created_by)
+            VALUES ($1,$2,$3,$4,$5)
+            """;
+        await using (var permission = new NpgsqlCommand(permissionSql, connection, transaction))
+        {
+            permission.Parameters.AddWithValue(serviceActorId);
+            permission.Parameters.AddWithValue(tenantId);
+            permission.Parameters.AddWithValue(companyId);
+            permission.Parameters.AddWithValue(PartyReportRefreshPermissions.Refresh);
+            permission.Parameters.AddWithValue(createdBy);
+            await permission.ExecuteNonQueryAsync();
+        }
+        await transaction.CommitAsync();
+    }
+
+    private static async Task SetServiceIdentityActiveAsync(
+        NpgsqlDataSource dataSource,
+        Guid tenantId,
+        Guid serviceActorId,
+        bool isActive)
+    {
+        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await ExecuteAsync(connection, transaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+        const string sql = """
+            UPDATE iam.service_identity
+            SET is_active=$3
+            WHERE tenant_id=$1 AND id=$2
+            """;
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        command.Parameters.AddWithValue(tenantId);
+        command.Parameters.AddWithValue(serviceActorId);
+        command.Parameters.AddWithValue(isActive);
+        Assert(await command.ExecuteNonQueryAsync() == 1,
+            "Service identity active-state fixture did not update exactly one row.");
+        await transaction.CommitAsync();
+    }
+
     private static async Task SeedAsync(
         NpgsqlDataSource dataSource,
         Guid tenantA,
@@ -1031,6 +1108,243 @@ internal static class DatabaseIntegrationCheck
         ((ClaimsIdentity)duplicateSubject.Identity!).AddClaim(new Claim("sub", "second-subject"));
         Assert(await resolver.ResolveAsync(duplicateSubject) is null,
             "Identity with multiple subject claims unexpectedly resolved to an ERP scope.");
+    }
+
+    private static async Task AssertPartyReportRefreshWorkQueueAsync(
+        NpgsqlDataSource migratorDataSource,
+        NpgsqlDataSource appDataSource,
+        string migratorConnectionString,
+        string appConnectionString,
+        Guid tenantId,
+        Guid companyId,
+        Guid otherCompanyId,
+        Guid ownerActorId)
+    {
+        Guid serviceActorId = Guid.CreateVersion7();
+        await SeedServiceIdentityAsync(
+            migratorDataSource,
+            tenantId,
+            companyId,
+            serviceActorId,
+            ownerActorId);
+        var serviceScope = new ExecutionScope(
+            tenantId,
+            serviceActorId,
+            [new CompanyAccess(companyId, [PartyReportRefreshPermissions.Refresh])]);
+        var store = new PostgresPartyReportRefreshWorkStore(appDataSource, serviceScope);
+        DateTimeOffset now = ToPostgresTimestamp(DateTimeOffset.UtcNow);
+
+        PartyReportRefreshRequest CreateRequest(
+            Guid generationId,
+            string reason,
+            long reportVersion = 1) => PartyReportRefreshRequest.Create(
+                tenantId,
+                companyId,
+                Guid.CreateVersion7(),
+                PartyAccountDetailReportDefinition.ReportCode,
+                reportVersion,
+                new DateOnly(2026, 8, 30),
+                now,
+                generationId,
+                Guid.CreateVersion7(),
+                Guid.CreateVersion7(),
+                Guid.CreateVersion7(),
+                Guid.CreateVersion7(),
+                now.AddSeconds(1),
+                reason,
+                now,
+                "Europe/Nicosia",
+                "kagu-default",
+                "run-once");
+
+        Guid workItemId = Guid.CreateVersion7();
+        Guid generationId = Guid.CreateVersion7();
+        PartyReportRefreshRequest request = CreateRequest(generationId, "integration-queue-concurrency");
+        var enqueue = new PartyReportRefreshEnqueueCommand(
+            workItemId,
+            $"queue-concurrency:{workItemId:N}",
+            request,
+            2,
+            now,
+            now,
+            serviceActorId);
+        PartyReportRefreshEnqueueResult created = await store.EnqueueAsync(enqueue);
+        PartyReportRefreshEnqueueResult replay = await store.EnqueueAsync(enqueue);
+        Assert(created.Created && !replay.Created && created.WorkItemId == replay.WorkItemId,
+            "Party report refresh enqueue did not preserve the first request on exact replay.");
+        PartyReportRefreshQueueException changedPayload =
+            await ThrowsAsync<PartyReportRefreshQueueException>(() => store.EnqueueAsync(
+                enqueue with { Request = CreateRequest(generationId, "changed-payload", 2) }).AsTask());
+        Assert(changedPayload.Code == "PARTY_REPORT_REFRESH_REQUEST_KEY_REUSED",
+            "Party report refresh request key accepted a changed canonical payload.");
+
+        var hiddenStore = new PostgresPartyReportRefreshWorkStore(
+            appDataSource,
+            new ExecutionScope(
+                tenantId,
+                serviceActorId,
+                [new CompanyAccess(otherCompanyId, [PartyReportRefreshPermissions.Refresh])]));
+        Assert(await hiddenStore.TryClaimAsync(now, TimeSpan.FromSeconds(30)) is null,
+            "Party report refresh queue exposed another company's pending work.");
+
+        var competingStore = new PostgresPartyReportRefreshWorkStore(appDataSource, serviceScope);
+        Task<PartyReportRefreshLease?> firstClaim = store.TryClaimAsync(
+            now,
+            TimeSpan.FromSeconds(30)).AsTask();
+        Task<PartyReportRefreshLease?> secondClaim = competingStore.TryClaimAsync(
+            now,
+            TimeSpan.FromSeconds(30)).AsTask();
+        PartyReportRefreshLease?[] claims = await Task.WhenAll(firstClaim, secondClaim);
+        PartyReportRefreshLease winner = claims.Single(item => item is not null)!;
+        Assert(claims.Count(item => item is not null) == 1 && winner.AttemptNumber == 1,
+            "SKIP LOCKED claim allowed two workers to lease the same refresh occurrence.");
+        Assert(await store.FailAsync(
+                winner,
+                "INTEGRATION_RETRY",
+                now.AddSeconds(1),
+                TimeSpan.Zero),
+            "First failed refresh attempt did not return to the bounded retry queue.");
+        PartyReportRefreshLease retry = await store.TryClaimAsync(
+            now.AddSeconds(2),
+            TimeSpan.FromSeconds(30)) ?? throw new InvalidOperationException("Retry was not claimable.");
+        Assert(retry.AttemptNumber == 2 && retry.WorkItemId == workItemId,
+            "Retry did not preserve work identity or increment its attempt.");
+        Assert(!await store.FailAsync(
+                retry,
+                "INTEGRATION_TERMINAL",
+                now.AddSeconds(3),
+                TimeSpan.Zero),
+            "Final refresh attempt was scheduled beyond max attempts.");
+
+        Guid reclaimWorkItemId = Guid.CreateVersion7();
+        PartyReportRefreshRequest reclaimRequest = CreateRequest(
+            Guid.CreateVersion7(),
+            "integration-expired-lease-reclaim");
+        await store.EnqueueAsync(new PartyReportRefreshEnqueueCommand(
+            reclaimWorkItemId,
+            $"expired-reclaim:{reclaimWorkItemId:N}",
+            reclaimRequest,
+            2,
+            now.AddSeconds(10),
+            now,
+            serviceActorId));
+        PartyReportRefreshLease firstLease = await store.TryClaimAsync(
+            now.AddSeconds(10),
+            TimeSpan.FromSeconds(5)) ?? throw new InvalidOperationException("Lease fixture was not claimable.");
+        PartyReportRefreshLease reclaimedLease = await store.TryClaimAsync(
+            now.AddSeconds(16),
+            TimeSpan.FromSeconds(5)) ?? throw new InvalidOperationException("Expired lease was not reclaimed.");
+        Assert(firstLease.WorkItemId == reclaimedLease.WorkItemId && reclaimedLease.AttemptNumber == 2 &&
+               firstLease.LeaseToken != reclaimedLease.LeaseToken,
+            "Expired refresh lease was not reclaimed with a new token and attempt.");
+        Assert(!await store.FailAsync(
+                reclaimedLease,
+                "INTEGRATION_RECLAIM_TERMINAL",
+                now.AddSeconds(17),
+                TimeSpan.Zero),
+            "Reclaimed final attempt was not terminal.");
+
+        Guid crashWorkItemId = Guid.CreateVersion7();
+        PartyReportRefreshRequest crashRequest = CreateRequest(
+            Guid.CreateVersion7(),
+            "integration-last-attempt-crash");
+        await store.EnqueueAsync(new PartyReportRefreshEnqueueCommand(
+            crashWorkItemId,
+            $"last-attempt-crash:{crashWorkItemId:N}",
+            crashRequest,
+            1,
+            now.AddSeconds(20),
+            now,
+            serviceActorId));
+        _ = await store.TryClaimAsync(now.AddSeconds(20), TimeSpan.FromSeconds(5)) ??
+            throw new InvalidOperationException("Last-attempt crash fixture was not claimable.");
+        Assert(await store.TryClaimAsync(now.AddSeconds(26), TimeSpan.FromSeconds(5)) is null,
+            "An expired last attempt was incorrectly reclaimed beyond max attempts.");
+
+        await using (NpgsqlConnection verifyConnection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction verifyTransaction = await verifyConnection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(
+                verifyConnection,
+                verifyTransaction,
+                tenantId,
+                serviceActorId,
+                companyId);
+            const string statusSql = """
+                SELECT status, last_error_code,
+                       (SELECT count(*) FROM reporting.party_report_refresh_event event
+                        WHERE event.tenant_id=item.tenant_id
+                          AND event.company_id=item.company_id
+                          AND event.work_item_id=item.work_item_id)
+                FROM reporting.party_report_refresh_work_item item
+                WHERE tenant_id=$1 AND company_id=$2 AND work_item_id=$3
+                """;
+            await using var status = new NpgsqlCommand(statusSql, verifyConnection, verifyTransaction);
+            status.Parameters.AddWithValue(tenantId);
+            status.Parameters.AddWithValue(companyId);
+            status.Parameters.AddWithValue(crashWorkItemId);
+            await using NpgsqlDataReader reader = await status.ExecuteReaderAsync();
+            Assert(await reader.ReadAsync() && reader.GetString(0) == "failed" &&
+                   reader.GetString(1) == "PARTY_REPORT_REFRESH_LEASE_EXPIRED" && reader.GetInt64(2) == 3,
+                "Expired last attempt did not produce a terminal append-only failure trail.");
+            await reader.CloseAsync();
+
+            await using var tamper = new NpgsqlCommand(
+                "UPDATE reporting.party_report_refresh_work_item SET status='pending' " +
+                "WHERE tenant_id=$1 AND company_id=$2 AND work_item_id=$3",
+                verifyConnection,
+                verifyTransaction);
+            tamper.Parameters.AddWithValue(tenantId);
+            tamper.Parameters.AddWithValue(companyId);
+            tamper.Parameters.AddWithValue(crashWorkItemId);
+            PostgresException terminalTamper = await ThrowsAsync<PostgresException>(() => tamper.ExecuteNonQueryAsync());
+            Assert(terminalTamper.SqlState == PostgresErrorCodes.ObjectNotInPrerequisiteState,
+                "Terminal refresh work was mutable through the runtime role.");
+            await verifyTransaction.RollbackAsync();
+        }
+
+        IConfiguration exactConfiguration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["KAGU_ERP_MIGRATOR_CONNECTION_STRING"] = migratorConnectionString,
+                ["KAGU_ERP_APP_CONNECTION_STRING"] = appConnectionString,
+                ["KAGU_ERP_REPORT_WORKER_TENANT_ID"] = tenantId.ToString(),
+                ["KAGU_ERP_REPORT_WORKER_ACTOR_ID"] = serviceActorId.ToString(),
+                ["KAGU_ERP_REPORT_WORKER_COMPANY_IDS"] = companyId.ToString(),
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddKaguErpBootstrap(exactConfiguration);
+        services.AddKaguErpPartyReportRefreshWorker(exactConfiguration);
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        IPartyReportRefreshCycle cycle = provider.GetRequiredService<IPartyReportRefreshCycle>();
+        Assert((await cycle.ProcessNextAsync()).Disposition == PartyReportRefreshCycleDisposition.Idle,
+            "Production Worker composition did not validate its exact IAM scope and become idle.");
+
+        IConfiguration overbroadConfiguration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["KAGU_ERP_APP_CONNECTION_STRING"] = appConnectionString,
+                ["KAGU_ERP_REPORT_WORKER_TENANT_ID"] = tenantId.ToString(),
+                ["KAGU_ERP_REPORT_WORKER_ACTOR_ID"] = serviceActorId.ToString(),
+                ["KAGU_ERP_REPORT_WORKER_COMPANY_IDS"] = $"{companyId},{otherCompanyId}",
+            })
+            .Build();
+        var overbroadServices = new ServiceCollection();
+        overbroadServices.AddKaguErpBootstrap(overbroadConfiguration);
+        overbroadServices.AddKaguErpPartyReportRefreshWorker(overbroadConfiguration);
+        await using ServiceProvider overbroadProvider = overbroadServices.BuildServiceProvider();
+        PartyReportWorkerIdentityException overbroad = await ThrowsAsync<PartyReportWorkerIdentityException>(() =>
+            overbroadProvider.GetRequiredService<IPartyReportRefreshCycle>().ProcessNextAsync().AsTask());
+        Assert(overbroad.Code == "PARTY_REPORT_WORKER_SCOPE_NOT_AUTHORIZED",
+            "Deployment company allow-list widened the authoritative service-identity scope.");
+
+        await SetServiceIdentityActiveAsync(migratorDataSource, tenantId, serviceActorId, false);
+        PartyReportWorkerIdentityException inactive = await ThrowsAsync<PartyReportWorkerIdentityException>(() =>
+            cycle.ProcessNextAsync().AsTask());
+        Assert(inactive.Code == "PARTY_REPORT_WORKER_SCOPE_NOT_AUTHORIZED",
+            "Inactive Worker service identity still resolved an execution scope.");
+        await SetServiceIdentityActiveAsync(migratorDataSource, tenantId, serviceActorId, true);
     }
 
     private static async Task AssertIdentityContextDoesNotLeakAsync(NpgsqlDataSource dataSource, Guid actorId)
@@ -2407,16 +2721,22 @@ internal static class DatabaseIntegrationCheck
         string sourceType = "integration.invoice",
         string postingPurpose = "journal-preparation",
         DateOnly? effectiveDate = null,
-        DateTimeOffset? recordedAt = null)
+        DateTimeOffset? recordedAt = null,
+        Guid? debitAccountId = null,
+        Guid? creditAccountId = null,
+        string functionalCurrency = "GBP",
+        decimal functionalUnitsNumerator = 1m)
     {
         Guid postingRuleVersionId = Guid.CreateVersion7();
         Guid chartVersionId = Guid.CreateVersion7();
-        Guid debitAccountId = Guid.CreateVersion7();
-        Guid creditAccountId = Guid.CreateVersion7();
+        Guid resolvedDebitAccountId = debitAccountId ?? Guid.CreateVersion7();
+        Guid resolvedCreditAccountId = creditAccountId ?? Guid.CreateVersion7();
         Guid dimensionId = Guid.CreateVersion7();
         CurrencyCode gbp = CurrencyCode.Create("GBP");
+        CurrencyCode functional = CurrencyCode.Create(functionalCurrency);
         ExchangeRateSnapshot rate = ExchangeRateSnapshot.Create(
-            tenantId, companyId, Guid.CreateVersion7(), 1, gbp, gbp, "spot", "integration", new DateOnly(2026, 8, 24), 1m, 1m);
+            tenantId, companyId, Guid.CreateVersion7(), 1, gbp, functional, "spot", "integration",
+            new DateOnly(2026, 8, 24), functionalUnitsNumerator, 1m);
         RoundingPolicySnapshot rounding = RoundingPolicySnapshot.Create(
             tenantId, companyId, Guid.CreateVersion7(), 1, 4, RoundingMode.ToEven);
         JournalCurrencyAmountSnapshot debitCurrency = JournalCurrencyAmountSnapshot.Create(
@@ -2432,11 +2752,11 @@ internal static class DatabaseIntegrationCheck
             postingPurpose,
             effectiveDate ?? new DateOnly(2026, 8, 24),
             recordedAt ?? new DateTimeOffset(2026, 8, 24, 12, 0, 0, TimeSpan.Zero),
-            gbp,
+            functional,
             [
-                JournalLineDraft.Create(debitAccountId, null, debitCurrency.FunctionalAmount,
+                JournalLineDraft.Create(resolvedDebitAccountId, null, debitCurrency.FunctionalAmount,
                     [DimensionAssignment.Create(dimensionId, Guid.CreateVersion7())], debitCurrency),
-                JournalLineDraft.Create(creditAccountId, null, creditCurrency.FunctionalAmount,
+                JournalLineDraft.Create(resolvedCreditAccountId, null, creditCurrency.FunctionalAmount,
                     [DimensionAssignment.Create(dimensionId, Guid.CreateVersion7())], creditCurrency),
             ]);
         string[] permissions = hasPostingPermission ? [AuthorizedJournalPostingCandidate.RequiredPermission] : [];
@@ -3152,7 +3472,10 @@ internal static class DatabaseIntegrationCheck
             PartyAccountOpeningEntrySide.Debit,
             125.5000m,
             new DateOnly(2026, 1, 1),
-            recordedAt);
+            recordedAt,
+            Guid.CreateVersion7(),
+            [PartyAccountOpeningDueLineDraft.Create(
+                Guid.CreateVersion7(), 125.5000m, new DateOnly(2026, 1, 1), Guid.CreateVersion7(), 1)]);
         var scope = new ExecutionScope(
             tenantId,
             actorId,
@@ -3171,9 +3494,21 @@ internal static class DatabaseIntegrationCheck
                 transaction,
                 preparation);
             Assert(created.Created && created.OpeningEventId == openingEventId && created.SourceVersion == 1 &&
+                   created.DueScheduleId == draft.DueScheduleId &&
                    created.BalanceSide == PartyAccountBalanceSide.Receivable && created.Currency == "GBP" &&
                    created.ControlAccountId == controlAccountId && created.RecordedAt == recordedAt,
                 "Opening writer did not snapshot the authoritative PartyAccount context.");
+            Assert(await CountAsync(
+                    connection,
+                    transaction,
+                    "SELECT count(*) FROM party.due_schedule WHERE due_schedule_id=$1",
+                    draft.DueScheduleId) == 1 &&
+                   await CountAsync(
+                       connection,
+                       transaction,
+                       "SELECT count(*) FROM party.due_schedule_line WHERE due_schedule_id=$1",
+                       draft.DueScheduleId) == 1,
+                "Opening writer did not persist the allocatable due schedule in the same transaction.");
 
             PartyAccountOpeningPersistenceResult replay = await PostgresPartyAccountOpeningWriter.PersistAsync(
                 connection,
@@ -3190,7 +3525,14 @@ internal static class DatabaseIntegrationCheck
                 PartyAccountOpeningEntrySide.Debit,
                 125.5100m,
                 draft.EffectiveDate,
-                recordedAt);
+                recordedAt,
+                draft.DueScheduleId,
+                [PartyAccountOpeningDueLineDraft.Create(
+                    draft.DueLines[0].DueScheduleLineId,
+                    125.5100m,
+                    draft.DueLines[0].DueDate,
+                    draft.DueLines[0].PaymentTermSnapshotId,
+                    draft.DueLines[0].PaymentTermVersion)]);
             PartyAccountOpeningPersistenceConflictException conflict =
                 await ThrowsAsync<PartyAccountOpeningPersistenceConflictException>(() =>
                     PostgresPartyAccountOpeningWriter.PersistAsync(
@@ -3199,6 +3541,29 @@ internal static class DatabaseIntegrationCheck
                         AuthorizedPartyAccountOpeningPreparation.Create(scope, changedDraft)).AsTask());
             Assert(conflict.OpeningEventId == openingEventId,
                 "Opening source identity accepted different immutable content.");
+
+            PartyAccountOpeningDraft oppositeSideDraft = PartyAccountOpeningDraft.Create(
+                tenantId,
+                companyId,
+                Guid.CreateVersion7(),
+                partyAccountId,
+                PartyAccountOpeningEntrySide.Credit,
+                1m,
+                draft.EffectiveDate,
+                recordedAt,
+                Guid.CreateVersion7(),
+                [PartyAccountOpeningDueLineDraft.Create(
+                    Guid.CreateVersion7(), 1m, draft.EffectiveDate, Guid.CreateVersion7(), 1)]);
+            PartyAccountOpeningEntrySideAccountMismatchException sideMismatch =
+                await ThrowsAsync<PartyAccountOpeningEntrySideAccountMismatchException>(() =>
+                    PostgresPartyAccountOpeningWriter.PersistAsync(
+                        connection,
+                        transaction,
+                        AuthorizedPartyAccountOpeningPreparation.Create(scope, oppositeSideDraft)).AsTask());
+            Assert(sideMismatch.PartyAccountId == partyAccountId &&
+                   sideMismatch.BalanceSide == PartyAccountBalanceSide.Receivable &&
+                   sideMismatch.EntrySide == PartyAccountOpeningEntrySide.Credit,
+                "Opening writer accepted an entry opposite to the PartyAccount natural side.");
             await transaction.CommitAsync();
         }
 
@@ -3216,7 +3581,10 @@ internal static class DatabaseIntegrationCheck
             PartyAccountOpeningEntrySide.Debit,
             1m,
             draft.EffectiveDate,
-            recordedAt);
+            recordedAt,
+            Guid.CreateVersion7(),
+            [PartyAccountOpeningDueLineDraft.Create(
+                Guid.CreateVersion7(), 1m, draft.EffectiveDate, Guid.CreateVersion7(), 1)]);
         await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
         await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
         {
@@ -3279,9 +3647,323 @@ internal static class DatabaseIntegrationCheck
         }
     }
 
+    private static async Task AssertAuthoritativeAgingPolicySourceAsync(
+        NpgsqlDataSource migratorDataSource,
+        NpgsqlDataSource appDataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid otherCompanyId,
+        Guid actorId)
+    {
+        Guid policyId = Guid.CreateVersion7();
+        DateTimeOffset firstRecordedAt = new(2026, 8, 1, 8, 0, 0, TimeSpan.Zero);
+        DateTimeOffset secondRecordedAt = new(2026, 8, 10, 8, 0, 0, TimeSpan.Zero);
+        CalendarDayAgingBucket[] firstBuckets =
+        [
+            CalendarDayAgingBucket.Create("all", int.MinValue, int.MaxValue),
+        ];
+        CalendarDayAgingBucket[] currentBuckets =
+        [
+            CalendarDayAgingBucket.Create("future", int.MinValue, -1),
+            CalendarDayAgingBucket.Create("due-now", 0, 0),
+            CalendarDayAgingBucket.Create("1-30", 1, 30),
+            CalendarDayAgingBucket.Create("31-60", 31, 60),
+            CalendarDayAgingBucket.Create("61-90", 61, 90),
+            CalendarDayAgingBucket.Create("91-120", 91, 120),
+            CalendarDayAgingBucket.Create("121+", 121, int.MaxValue),
+        ];
+        await InsertAgingPolicyDefinitionAsync(
+            migratorDataSource,
+            tenantId,
+            companyId,
+            actorId,
+            policyId,
+            1,
+            new DateOnly(2026, 1, 1),
+            firstRecordedAt,
+            firstBuckets);
+        await InsertAgingPolicyDefinitionAsync(
+            migratorDataSource,
+            tenantId,
+            companyId,
+            actorId,
+            policyId,
+            2,
+            new DateOnly(2026, 7, 1),
+            secondRecordedAt,
+            currentBuckets);
+
+        var scope = new ExecutionScope(tenantId, actorId, [companyId, otherCompanyId]);
+        var source = new PostgresPartyAgingPolicySource(appDataSource, scope);
+        CalendarDayAgingPolicySnapshot? beforeEffective = await source.LoadAsync(
+            tenantId,
+            companyId,
+            new DateOnly(2026, 6, 30),
+            secondRecordedAt.AddDays(1));
+        Assert(beforeEffective is not null && beforeEffective.PolicyId == policyId &&
+               beforeEffective.Version == 1 && beforeEffective.Buckets.Single().Code == "all",
+            "Aging policy source did not respect the effective-date cut.");
+
+        CalendarDayAgingPolicySnapshot? beforeRecorded = await source.LoadAsync(
+            tenantId,
+            companyId,
+            new DateOnly(2026, 12, 31),
+            secondRecordedAt.AddTicks(-1));
+        Assert(beforeRecorded is not null && beforeRecorded.Version == 1,
+            "Aging policy source leaked a version recorded after the data cutoff.");
+
+        CalendarDayAgingPolicySnapshot? current = await source.LoadAsync(
+            tenantId,
+            companyId,
+            new DateOnly(2026, 12, 31),
+            secondRecordedAt);
+        Assert(current is not null && current.PolicyId == policyId && current.Version == 2 &&
+               string.Join('|', current.Buckets.Select(bucket => bucket.Code)) ==
+               "future|due-now|1-30|31-60|61-90|91-120|121+",
+            "Aging policy source did not reconstruct the authoritative company policy.");
+        DateTimeOffset thirdRecordedAt = secondRecordedAt.AddDays(1);
+        await InsertRuntimeAgingPolicyDefinitionAsync(
+            appDataSource,
+            tenantId,
+            companyId,
+            actorId,
+            policyId,
+            3,
+            new DateOnly(2027, 1, 1),
+            thirdRecordedAt,
+            currentBuckets);
+        CalendarDayAgingPolicySnapshot? beforeFutureEffective = await source.LoadAsync(
+            tenantId,
+            companyId,
+            new DateOnly(2026, 12, 31),
+            thirdRecordedAt);
+        Assert(beforeFutureEffective is not null && beforeFutureEffective.Version == 2,
+            "A future-effective aging policy changed the current report cut.");
+        Assert(await source.LoadAsync(
+                   tenantId,
+                   otherCompanyId,
+                   new DateOnly(2026, 12, 31),
+                   secondRecordedAt) is null,
+            "A company without an aging policy did not fail closed with no source result.");
+
+        var restrictedSource = new PostgresPartyAgingPolicySource(
+            appDataSource,
+            new ExecutionScope(tenantId, actorId, [companyId]));
+        await ThrowsAsync<ExecutionScopeDeniedException>(() => restrictedSource.LoadAsync(
+            tenantId,
+            otherCompanyId,
+            new DateOnly(2026, 12, 31),
+            secondRecordedAt).AsTask());
+
+        await using (NpgsqlConnection rlsConnection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction rlsTransaction = await rlsConnection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(rlsConnection, rlsTransaction, tenantId, actorId, otherCompanyId);
+            Assert(await CountAsync(
+                    rlsConnection,
+                    rlsTransaction,
+                    "SELECT count(*) FROM reporting.aging_policy_definition WHERE policy_id = $1",
+                    policyId) == 0,
+                "Aging policy definition leaked through a different company RLS scope.");
+            await rlsTransaction.CommitAsync();
+        }
+
+        await using (NpgsqlConnection privilegeConnection = await appDataSource.OpenConnectionAsync())
+        await using (var privilege = new NpgsqlCommand(
+            "SELECT has_table_privilege(current_user,'reporting.aging_policy_definition','SELECT'),has_table_privilege(current_user,'reporting.aging_policy_definition','INSERT'),has_table_privilege(current_user,'reporting.aging_policy_definition','UPDATE'),has_table_privilege(current_user,'reporting.aging_policy_definition_bucket','DELETE')",
+            privilegeConnection))
+        await using (NpgsqlDataReader reader = await privilege.ExecuteReaderAsync())
+        {
+            Assert(await reader.ReadAsync() && reader.GetBoolean(0) && reader.GetBoolean(1) &&
+                   !reader.GetBoolean(2) && !reader.GetBoolean(3),
+                "Runtime aging-policy definition privileges are not append-only.");
+        }
+
+        await using (NpgsqlConnection gapConnection = await migratorDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction gapTransaction = await gapConnection.BeginTransactionAsync())
+        {
+            await ExecuteAsync(gapConnection, gapTransaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+            await using var gap = new NpgsqlCommand(
+                "INSERT INTO reporting.aging_policy_definition (tenant_id,company_id,policy_id,policy_version,effective_from,recorded_at,recorded_by,bucket_count) VALUES ($1,$2,$3,5,$4,$5,$6,1)",
+                gapConnection,
+                gapTransaction);
+            gap.Parameters.AddWithValue(tenantId);
+            gap.Parameters.AddWithValue(companyId);
+            gap.Parameters.AddWithValue(policyId);
+            gap.Parameters.AddWithValue(new DateOnly(2027, 1, 1));
+            gap.Parameters.AddWithValue(secondRecordedAt.AddDays(1));
+            gap.Parameters.AddWithValue(actorId);
+            PostgresException exception = await ThrowsAsync<PostgresException>(() => gap.ExecuteNonQueryAsync());
+            Assert(exception.SqlState == PostgresErrorCodes.CheckViolation &&
+                   exception.ConstraintName == "ck_aging_policy_definition_version_sequence",
+                "Database accepted a non-contiguous aging policy version.");
+            await gapTransaction.RollbackAsync();
+        }
+
+        await using (NpgsqlConnection identityConnection = await migratorDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction identityTransaction = await identityConnection.BeginTransactionAsync())
+        {
+            await ExecuteAsync(identityConnection, identityTransaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+            await using var changedIdentity = new NpgsqlCommand(
+                "INSERT INTO reporting.aging_policy_definition (tenant_id,company_id,policy_id,policy_version,effective_from,recorded_at,recorded_by,bucket_count) VALUES ($1,$2,$3,4,$4,$5,$6,1)",
+                identityConnection,
+                identityTransaction);
+            changedIdentity.Parameters.AddWithValue(tenantId);
+            changedIdentity.Parameters.AddWithValue(companyId);
+            changedIdentity.Parameters.AddWithValue(Guid.CreateVersion7());
+            changedIdentity.Parameters.AddWithValue(new DateOnly(2027, 1, 1));
+            changedIdentity.Parameters.AddWithValue(secondRecordedAt.AddDays(1));
+            changedIdentity.Parameters.AddWithValue(actorId);
+            PostgresException exception = await ThrowsAsync<PostgresException>(() => changedIdentity.ExecuteNonQueryAsync());
+            Assert(exception.SqlState == PostgresErrorCodes.CheckViolation &&
+                   exception.ConstraintName == "ck_aging_policy_definition_policy_id_stable",
+                "Database accepted a different policy identity in one company stream.");
+            await identityTransaction.RollbackAsync();
+        }
+
+        await using (NpgsqlConnection coverageConnection = await migratorDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction coverageTransaction = await coverageConnection.BeginTransactionAsync())
+        {
+            await ExecuteAsync(coverageConnection, coverageTransaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+            const string headerSql = "INSERT INTO reporting.aging_policy_definition (tenant_id,company_id,policy_id,policy_version,effective_from,recorded_at,recorded_by,bucket_count) VALUES ($1,$2,$3,1,$4,$5,$6,2)";
+            await using (var header = new NpgsqlCommand(headerSql, coverageConnection, coverageTransaction))
+            {
+                header.Parameters.AddWithValue(tenantId);
+                header.Parameters.AddWithValue(otherCompanyId);
+                header.Parameters.AddWithValue(Guid.CreateVersion7());
+                header.Parameters.AddWithValue(new DateOnly(2026, 1, 1));
+                header.Parameters.AddWithValue(firstRecordedAt);
+                header.Parameters.AddWithValue(actorId);
+                await header.ExecuteNonQueryAsync();
+            }
+            const string bucketsSql = "INSERT INTO reporting.aging_policy_definition_bucket (tenant_id,company_id,policy_version,bucket_ordinal,bucket_code,minimum_days_overdue,maximum_days_overdue) VALUES ($1,$2,1,1,'before',-2147483648,0),($1,$2,1,2,'after',2,2147483647)";
+            await using (var buckets = new NpgsqlCommand(bucketsSql, coverageConnection, coverageTransaction))
+            {
+                buckets.Parameters.AddWithValue(tenantId);
+                buckets.Parameters.AddWithValue(otherCompanyId);
+                await buckets.ExecuteNonQueryAsync();
+            }
+            PostgresException exception = await ThrowsAsync<PostgresException>(() => coverageTransaction.CommitAsync());
+            Assert(exception.SqlState == PostgresErrorCodes.CheckViolation &&
+                   exception.ConstraintName == "ck_aging_policy_definition_bucket_coverage",
+                "Database accepted a gapped authoritative aging policy.");
+        }
+    }
+
+    private static async Task InsertAgingPolicyDefinitionAsync(
+        NpgsqlDataSource dataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid actorId,
+        Guid policyId,
+        long policyVersion,
+        DateOnly effectiveFrom,
+        DateTimeOffset recordedAt,
+        CalendarDayAgingBucket[] buckets)
+    {
+        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await ExecuteAsync(connection, transaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+        const string headerSql = """
+            INSERT INTO reporting.aging_policy_definition
+                (tenant_id,company_id,policy_id,policy_version,effective_from,recorded_at,
+                 recorded_by,bucket_count)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+            """;
+        await using (var header = new NpgsqlCommand(headerSql, connection, transaction))
+        {
+            header.Parameters.AddWithValue(tenantId);
+            header.Parameters.AddWithValue(companyId);
+            header.Parameters.AddWithValue(policyId);
+            header.Parameters.AddWithValue(policyVersion);
+            header.Parameters.AddWithValue(effectiveFrom);
+            header.Parameters.AddWithValue(recordedAt);
+            header.Parameters.AddWithValue(actorId);
+            header.Parameters.AddWithValue(buckets.Length);
+            await header.ExecuteNonQueryAsync();
+        }
+
+        const string bucketSql = """
+            INSERT INTO reporting.aging_policy_definition_bucket
+                (tenant_id,company_id,policy_version,bucket_ordinal,bucket_code,
+                 minimum_days_overdue,maximum_days_overdue)
+            VALUES ($1,$2,$3,$4,$5,$6,$7)
+            """;
+        for (var index = 0; index < buckets.Length; index++)
+        {
+            CalendarDayAgingBucket bucket = buckets[index];
+            await using var command = new NpgsqlCommand(bucketSql, connection, transaction);
+            command.Parameters.AddWithValue(tenantId);
+            command.Parameters.AddWithValue(companyId);
+            command.Parameters.AddWithValue(policyVersion);
+            command.Parameters.AddWithValue(index + 1);
+            command.Parameters.AddWithValue(bucket.Code);
+            command.Parameters.AddWithValue(bucket.MinimumDaysOverdue);
+            command.Parameters.AddWithValue(bucket.MaximumDaysOverdue);
+            await command.ExecuteNonQueryAsync();
+        }
+        await transaction.CommitAsync();
+    }
+
+    private static async Task InsertRuntimeAgingPolicyDefinitionAsync(
+        NpgsqlDataSource dataSource,
+        Guid tenantId,
+        Guid companyId,
+        Guid actorId,
+        Guid policyId,
+        long policyVersion,
+        DateOnly effectiveFrom,
+        DateTimeOffset recordedAt,
+        CalendarDayAgingBucket[] buckets)
+    {
+        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+        const string headerSql = """
+            INSERT INTO reporting.aging_policy_definition
+                (tenant_id,company_id,policy_id,policy_version,effective_from,recorded_at,
+                 recorded_by,bucket_count)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+            """;
+        await using (var header = new NpgsqlCommand(headerSql, connection, transaction))
+        {
+            header.Parameters.AddWithValue(tenantId);
+            header.Parameters.AddWithValue(companyId);
+            header.Parameters.AddWithValue(policyId);
+            header.Parameters.AddWithValue(policyVersion);
+            header.Parameters.AddWithValue(effectiveFrom);
+            header.Parameters.AddWithValue(recordedAt);
+            header.Parameters.AddWithValue(actorId);
+            header.Parameters.AddWithValue(buckets.Length);
+            await header.ExecuteNonQueryAsync();
+        }
+
+        const string bucketSql = """
+            INSERT INTO reporting.aging_policy_definition_bucket
+                (tenant_id,company_id,policy_version,bucket_ordinal,bucket_code,
+                 minimum_days_overdue,maximum_days_overdue)
+            VALUES ($1,$2,$3,$4,$5,$6,$7)
+            """;
+        for (var index = 0; index < buckets.Length; index++)
+        {
+            CalendarDayAgingBucket bucket = buckets[index];
+            await using var command = new NpgsqlCommand(bucketSql, connection, transaction);
+            command.Parameters.AddWithValue(tenantId);
+            command.Parameters.AddWithValue(companyId);
+            command.Parameters.AddWithValue(policyVersion);
+            command.Parameters.AddWithValue(index + 1);
+            command.Parameters.AddWithValue(bucket.Code);
+            command.Parameters.AddWithValue(bucket.MinimumDaysOverdue);
+            command.Parameters.AddWithValue(bucket.MaximumDaysOverdue);
+            await command.ExecuteNonQueryAsync();
+        }
+        await transaction.CommitAsync();
+    }
+
     private static async Task AssertAuthoritativePartyReportSourceAsync(
         NpgsqlDataSource migratorDataSource,
         NpgsqlDataSource appDataSource,
+        string appConnectionString,
         Guid tenantId,
         Guid companyId,
         Guid otherCompanyId,
@@ -3351,7 +4033,10 @@ internal static class DatabaseIntegrationCheck
             PartyAccountOpeningEntrySide.Debit,
             25m,
             openingEffectiveDate,
-            openingRecordedAt);
+            openingRecordedAt,
+            Guid.CreateVersion7(),
+            [PartyAccountOpeningDueLineDraft.Create(
+                Guid.CreateVersion7(), 25m, openingEffectiveDate, Guid.CreateVersion7(), 1)]);
         var openingScope = new ExecutionScope(
             tenantId,
             actorId,
@@ -3484,13 +4169,182 @@ internal static class DatabaseIntegrationCheck
             dueCommand.SourceType,
             dueCommand.SourcePostingPurpose,
             dueEffectiveDate,
-            dueRecordedAt);
+            dueRecordedAt,
+            debitAccountId: controlAccountId,
+            functionalCurrency: "TRY",
+            functionalUnitsNumerator: 40m);
+        Guid dueJournalId = Guid.CreateVersion7();
         await PostJournalFixtureAsync(
             migratorDataSource,
             appDataSource,
             dueJournalRequest,
-            Guid.CreateVersion7(),
+            dueJournalId,
             actorId);
+        DateTimeOffset dueGoldenCutoff = ToPostgresTimestamp(DateTimeOffset.UtcNow.AddMinutes(1));
+        PartyReportSourceQuery dueGoldenQuery = query with { RecordedCutoff = dueGoldenCutoff };
+        PartyReportSourceBatch? dueGoldenSource = await source.LoadAsync(dueGoldenQuery);
+        Assert(dueGoldenSource is not null && dueGoldenSource.OpeningExposure == 0m &&
+               dueGoldenSource.OpenItems.Single().RemainingAmount == 75m &&
+               dueGoldenSource.PostingLineage.Count == 1 &&
+               dueGoldenSource.PostingLineage[0].JournalId == dueJournalId,
+            "Posted due source did not expose its exact journal lineage for the golden report cut.");
+        var postgresControlSource = new PostgresPartyControlAccountEvidenceSource(
+            appDataSource,
+            reportScope,
+            LoadPartyGeneralLedgerEvidenceAsync);
+        var dueGoldenJob = new PartyReportProjectionJob(
+            source,
+            new PostgresPartyAgingPolicySource(appDataSource, reportScope),
+            postgresControlSource,
+            new PostgresPartyReportProjectionSink(appDataSource, reportScope));
+        Guid dueGoldenGenerationId = Guid.CreateVersion7();
+        Guid dueGoldenStatementId = Guid.CreateVersion7();
+        Guid dueGoldenAgingId = Guid.CreateVersion7();
+        Guid dueGoldenCrossFootId = Guid.CreateVersion7();
+        Guid dueGoldenReconciliationId = Guid.CreateVersion7();
+        var dueGoldenCommand = new PartyReportProjectionJobCommand(
+            dueGoldenQuery,
+            "party.account.detail",
+            1,
+            dueGoldenGenerationId,
+            dueGoldenStatementId,
+            dueGoldenAgingId,
+            dueGoldenCrossFootId,
+            dueGoldenReconciliationId,
+            dueGoldenCutoff.AddMinutes(1),
+            "integration-golden-source-to-gl");
+        PartyReportProjectionJobResult dueGoldenCreated = await dueGoldenJob.RunAsync(dueGoldenCommand);
+        PartyReportProjectionJobResult dueGoldenReplay = await dueGoldenJob.RunAsync(dueGoldenCommand);
+        Assert(dueGoldenCreated.Created && !dueGoldenReplay.Created &&
+               dueGoldenReplay.ProjectionGenerationId == dueGoldenGenerationId,
+            "Real Party source-to-GL projection did not create then idempotently replay one generation.");
+        await AssertPersistedPartyGoldenAsync(
+            appDataSource,
+            reportScope,
+            companyId,
+            dueGoldenCrossFootId,
+            dueGoldenStatementId,
+            dueGoldenAgingId,
+            dueGoldenReconciliationId,
+            dueGoldenGenerationId,
+            75m);
+
+        Guid workerActorId = Guid.CreateVersion7();
+        await SeedServiceIdentityAsync(
+            migratorDataSource,
+            tenantId,
+            companyId,
+            workerActorId,
+            actorId);
+        var workerScope = new ExecutionScope(
+            tenantId,
+            workerActorId,
+            [new CompanyAccess(companyId, [PartyReportRefreshPermissions.Refresh])]);
+        DateTimeOffset workerScheduledAt = ToPostgresTimestamp(DateTimeOffset.UtcNow);
+        Guid workerGenerationId = Guid.CreateVersion7();
+        Guid workerStatementId = Guid.CreateVersion7();
+        Guid workerAgingId = Guid.CreateVersion7();
+        Guid workerCrossFootId = Guid.CreateVersion7();
+        Guid workerReconciliationId = Guid.CreateVersion7();
+        PartyReportRefreshRequest workerRequest = PartyReportRefreshRequest.Create(
+            tenantId,
+            companyId,
+            partyAccountId,
+            PartyAccountDetailReportDefinition.ReportCode,
+            PartyAccountDetailReportDefinition.Version,
+            dueGoldenQuery.EffectiveAsOf,
+            dueGoldenQuery.RecordedCutoff,
+            workerGenerationId,
+            workerStatementId,
+            workerAgingId,
+            workerCrossFootId,
+            workerReconciliationId,
+            dueGoldenCutoff.AddMinutes(2),
+            "integration-production-worker",
+            workerScheduledAt,
+            "Europe/Nicosia",
+            "kagu-default",
+            "run-once");
+        var workerStore = new PostgresPartyReportRefreshWorkStore(appDataSource, workerScope);
+        Guid workerWorkItemId = Guid.CreateVersion7();
+        await workerStore.EnqueueAsync(new PartyReportRefreshEnqueueCommand(
+            workerWorkItemId,
+            $"party-golden-worker:{workerWorkItemId:N}",
+            workerRequest,
+            3,
+            workerScheduledAt,
+            workerScheduledAt,
+            workerActorId));
+        IConfiguration workerConfiguration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["KAGU_ERP_APP_CONNECTION_STRING"] = appConnectionString,
+                ["KAGU_ERP_REPORT_WORKER_TENANT_ID"] = tenantId.ToString(),
+                ["KAGU_ERP_REPORT_WORKER_ACTOR_ID"] = workerActorId.ToString(),
+                ["KAGU_ERP_REPORT_WORKER_COMPANY_IDS"] = companyId.ToString(),
+            })
+            .Build();
+        var workerServices = new ServiceCollection();
+        workerServices.AddKaguErpBootstrap(workerConfiguration);
+        workerServices.AddKaguErpPartyReportRefreshWorker(workerConfiguration);
+        await using (ServiceProvider workerProvider = workerServices.BuildServiceProvider())
+        {
+            IPartyReportRefreshCycle workerCycle =
+                workerProvider.GetRequiredService<IPartyReportRefreshCycle>();
+            PartyReportRefreshCycleResult workerResult = await workerCycle.ProcessNextAsync();
+            string workerPersistenceState;
+            await using (NpgsqlConnection diagnosticConnection = await appDataSource.OpenConnectionAsync())
+            await using (NpgsqlTransaction diagnosticTransaction = await diagnosticConnection.BeginTransactionAsync())
+            {
+                await SetAuditScopeAsync(
+                    diagnosticConnection,
+                    diagnosticTransaction,
+                    tenantId,
+                    workerActorId,
+                    companyId);
+                const string diagnosticSql = """
+                    SELECT item.status, item.last_error_code,
+                           EXISTS(SELECT 1 FROM reporting.projection_generation generation
+                                  WHERE generation.tenant_id=item.tenant_id
+                                    AND generation.company_id=item.company_id
+                                    AND generation.projection_generation_id=item.projection_generation_id)
+                    FROM reporting.party_report_refresh_work_item item
+                    WHERE item.tenant_id=$1 AND item.company_id=$2 AND item.work_item_id=$3
+                    """;
+                await using var diagnostic = new NpgsqlCommand(
+                    diagnosticSql,
+                    diagnosticConnection,
+                    diagnosticTransaction);
+                diagnostic.Parameters.AddWithValue(tenantId);
+                diagnostic.Parameters.AddWithValue(companyId);
+                diagnostic.Parameters.AddWithValue(workerWorkItemId);
+                await using NpgsqlDataReader diagnosticReader = await diagnostic.ExecuteReaderAsync();
+                Assert(await diagnosticReader.ReadAsync(), "Worker diagnostic work item was not visible.");
+                workerPersistenceState =
+                    $"status={diagnosticReader.GetString(0)}, " +
+                    $"storedError={(diagnosticReader.IsDBNull(1) ? "none" : diagnosticReader.GetString(1))}, " +
+                    $"projectionExists={diagnosticReader.GetBoolean(2)}";
+                await diagnosticReader.CloseAsync();
+                await diagnosticTransaction.CommitAsync();
+            }
+            Assert(workerResult.Disposition == PartyReportRefreshCycleDisposition.Completed &&
+                   workerResult.WorkItemId == workerWorkItemId && workerResult.AttemptNumber == 1,
+                $"Production Worker composition did not complete the durable Party projection work item; " +
+                $"disposition={workerResult.Disposition}, error={workerResult.ErrorCode ?? "none"}, " +
+                $"{workerPersistenceState}.");
+            Assert((await workerCycle.ProcessNextAsync()).Disposition == PartyReportRefreshCycleDisposition.Idle,
+                "Completed durable Party projection work was claimed a second time.");
+        }
+        await AssertPersistedPartyGoldenAsync(
+            appDataSource,
+            workerScope,
+            companyId,
+            workerCrossFootId,
+            workerStatementId,
+            workerAgingId,
+            workerReconciliationId,
+            workerGenerationId,
+            75m);
         JournalPreparationRequest openingJournalRequest = CreateJournalPreparationRequest(
             tenantId,
             companyId,
@@ -3501,21 +4355,31 @@ internal static class DatabaseIntegrationCheck
             PartyAccountOpeningDraft.SourceType,
             PartyAccountOpeningDraft.PostingPurpose,
             openingEffectiveDate,
-            openingRecordedAt);
+            openingRecordedAt,
+            debitAccountId: controlAccountId,
+            functionalCurrency: "TRY",
+            functionalUnitsNumerator: 40m);
+        Guid openingJournalId = Guid.CreateVersion7();
         await PostJournalFixtureAsync(
             migratorDataSource,
             appDataSource,
             openingJournalRequest,
-            Guid.CreateVersion7(),
+            openingJournalId,
             actorId);
 
         PartyReportSourceBatch? posted = await source.LoadAsync(
             query with { RecordedCutoff = DateTimeOffset.UtcNow.AddMinutes(1) });
-        Assert(posted is not null && posted.OpeningExposure == 25m && posted.OpenItems.Count == 1 &&
-               posted.OpenItems[0].SourceEventId == dueSourceEventId &&
-               posted.OpenItems[0].OriginalAmount == 75m && posted.OpenItems[0].RemainingAmount == 75m &&
-               posted.OpenItems[0].EffectiveDate == dueEffectiveDate &&
-               posted.OpenItems[0].RestrictionEvidence == PartyReportRestrictionEvidence.Clear &&
+        PartyOpenItemSourceFact? postedDue = posted?.OpenItems
+            .SingleOrDefault(item => item.SourceEventId == dueSourceEventId);
+        PartyOpenItemSourceFact? postedOpening = posted?.OpenItems
+            .SingleOrDefault(item => item.SourceEventId == openingEventId);
+        Assert(posted is not null && posted.OpeningExposure == 0m && posted.OpenItems.Count == 2 &&
+               postedDue is not null && postedDue.OriginalAmount == 75m &&
+               postedDue.RemainingAmount == 75m && postedDue.EffectiveDate == dueEffectiveDate &&
+               postedDue.RestrictionEvidence == PartyReportRestrictionEvidence.Clear &&
+               postedOpening is not null && postedOpening.OriginalAmount == 25m &&
+               postedOpening.RemainingAmount == 25m &&
+               postedOpening.DueDate == openingDraft.DueLines[0].DueDate &&
                posted.SourceWatermarkFrom.StartsWith("posted-journal:", StringComparison.Ordinal) &&
                posted.SourceWatermarkTo.StartsWith("posted-set-v1:", StringComparison.Ordinal) &&
                posted.SourceChecksumSha256.Length == 64,
@@ -3574,7 +4438,8 @@ internal static class DatabaseIntegrationCheck
         }
         PartyReportSourceBatch? disputed = await source.LoadAsync(
             query with { RecordedCutoff = DateTimeOffset.UtcNow.AddMinutes(1) });
-        Assert(disputed?.OpenItems.Single().RestrictionEvidence == PartyReportRestrictionEvidence.Disputed,
+        Assert(disputed?.OpenItems.Single(item => item.SourceEventId == dueSourceEventId).RestrictionEvidence ==
+               PartyReportRestrictionEvidence.Disputed,
             "Authoritative Party source did not expose the active dispute evidence.");
 
         await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
@@ -3665,7 +4530,8 @@ internal static class DatabaseIntegrationCheck
         }
         PartyReportSourceBatch? blocked = await source.LoadAsync(
             query with { RecordedCutoff = DateTimeOffset.UtcNow.AddMinutes(5) });
-        Assert(blocked?.OpenItems.Single().RestrictionEvidence == PartyReportRestrictionEvidence.Blocked,
+        Assert(blocked?.OpenItems.Single(item => item.SourceEventId == dueSourceEventId).RestrictionEvidence ==
+               PartyReportRestrictionEvidence.Blocked,
             "Authoritative Party source did not preserve the active collection block after dispute release.");
 
         var hiddenSource = new PostgresPartyReportSource(
@@ -3736,8 +4602,9 @@ internal static class DatabaseIntegrationCheck
 
         PartyReportSourceBatch? beforeImpactPosting = await source.LoadAsync(
             query with { RecordedCutoff = impactRecordedAt.AddMinutes(1) });
-        Assert(beforeImpactPosting is not null && beforeImpactPosting.OpenItems.Single().RemainingAmount == 75m &&
-               beforeImpactPosting.OpenItems.Single().Impacts.Count == 0,
+        Assert(beforeImpactPosting is not null &&
+               beforeImpactPosting.OpenItems.Single(item => item.SourceEventId == dueSourceEventId).RemainingAmount == 75m &&
+               beforeImpactPosting.OpenItems.Single(item => item.SourceEventId == dueSourceEventId).Impacts.Count == 0,
             "An unposted open-item impact changed the authoritative report batch.");
 
         JournalPreparationRequest impactJournalRequest = CreateJournalPreparationRequest(
@@ -3750,7 +4617,10 @@ internal static class DatabaseIntegrationCheck
             impact.SourceType,
             impact.SourcePostingPurpose,
             impact.EffectiveDate,
-            impact.RecordedAt);
+            impact.RecordedAt,
+            creditAccountId: controlAccountId,
+            functionalCurrency: "TRY",
+            functionalUnitsNumerator: 40m);
         Guid impactJournalId = Guid.CreateVersion7();
         await PostJournalFixtureAsync(
             migratorDataSource,
@@ -3761,10 +4631,10 @@ internal static class DatabaseIntegrationCheck
         PartyReportSourceBatch? afterImpactPosting = await source.LoadAsync(
             query with { RecordedCutoff = DateTimeOffset.UtcNow.AddMinutes(1) });
         Assert(afterImpactPosting is not null &&
-               afterImpactPosting.OpenItems.Single().RemainingAmount == 65m &&
-               afterImpactPosting.OpenItems.Single().Impacts.Count == 1 &&
-               afterImpactPosting.OpenItems.Single().Impacts[0].EventId == impact.EventId &&
-               afterImpactPosting.OpenItems.Single().Impacts[0].Kind == PartyReportImpactKind.Allocation,
+               afterImpactPosting.OpenItems.Single(item => item.SourceEventId == dueSourceEventId).RemainingAmount == 65m &&
+               afterImpactPosting.OpenItems.Single(item => item.SourceEventId == dueSourceEventId).Impacts.Count == 1 &&
+               afterImpactPosting.OpenItems.Single(item => item.SourceEventId == dueSourceEventId).Impacts[0].EventId == impact.EventId &&
+               afterImpactPosting.OpenItems.Single(item => item.SourceEventId == dueSourceEventId).Impacts[0].Kind == PartyReportImpactKind.Allocation,
             "Exact posted allocation evidence did not reduce Party open-item remaining amount.");
 
         DateTimeOffset unallocationRecordedAt = DateTimeOffset.UtcNow;
@@ -3799,8 +4669,8 @@ internal static class DatabaseIntegrationCheck
         PartyReportSourceBatch? beforeCounterPosting = await source.LoadAsync(
             query with { RecordedCutoff = unallocationRecordedAt.AddMinutes(1) });
         Assert(beforeCounterPosting is not null &&
-               beforeCounterPosting.OpenItems.Single().RemainingAmount == 65m &&
-               beforeCounterPosting.OpenItems.Single().Impacts.Count == 1,
+               beforeCounterPosting.OpenItems.Single(item => item.SourceEventId == dueSourceEventId).RemainingAmount == 65m &&
+               beforeCounterPosting.OpenItems.Single(item => item.SourceEventId == dueSourceEventId).Impacts.Count == 1,
             "An unposted counter impact changed the authoritative report batch.");
 
         JournalPreparationRequest unallocationJournalRequest = CreateJournalPreparationRequest(
@@ -3813,7 +4683,10 @@ internal static class DatabaseIntegrationCheck
             unallocation.SourceType,
             unallocation.SourcePostingPurpose,
             unallocation.EffectiveDate,
-            unallocation.RecordedAt);
+            unallocation.RecordedAt,
+            debitAccountId: controlAccountId,
+            functionalCurrency: "TRY",
+            functionalUnitsNumerator: 40m);
         Guid unallocationJournalId = Guid.CreateVersion7();
         await PostJournalFixtureAsync(
             migratorDataSource,
@@ -3824,11 +4697,95 @@ internal static class DatabaseIntegrationCheck
         PartyReportSourceBatch? afterCounterPosting = await source.LoadAsync(
             query with { RecordedCutoff = DateTimeOffset.UtcNow.AddMinutes(1) });
         Assert(afterCounterPosting is not null &&
-               afterCounterPosting.OpenItems.Single().RemainingAmount == 75m &&
-               afterCounterPosting.OpenItems.Single().Impacts.Count == 2 &&
-               afterCounterPosting.OpenItems.Single().Impacts[1].EventId == unallocation.EventId &&
-               afterCounterPosting.OpenItems.Single().Impacts[1].Kind == PartyReportImpactKind.Unallocation,
+               afterCounterPosting.OpenItems.Single(item => item.SourceEventId == dueSourceEventId).RemainingAmount == 75m &&
+               afterCounterPosting.OpenItems.Single(item => item.SourceEventId == dueSourceEventId).Impacts.Count == 2 &&
+               afterCounterPosting.OpenItems.Single(item => item.SourceEventId == dueSourceEventId).Impacts[1].EventId == unallocation.EventId &&
+               afterCounterPosting.OpenItems.Single(item => item.SourceEventId == dueSourceEventId).Impacts[1].Kind == PartyReportImpactKind.Unallocation &&
+               afterCounterPosting.PostingLineage.Count == 4 &&
+               afterCounterPosting.PostingLineage.Select(item => item.JournalId).ToHashSet()
+                   .SetEquals([dueJournalId, openingJournalId, impactJournalId, unallocationJournalId]),
             "Exact posted unallocation lifecycle did not restore the Party open-item remaining amount.");
+
+        PartyReportSourceBatch combinedSource = afterCounterPosting ??
+            throw new InvalidOperationException("Combined Party report source was not returned.");
+        Guid combinedGenerationId = Guid.CreateVersion7();
+        DateTimeOffset combinedGeneratedAt = combinedSource.RecordedCutoff.AddMinutes(1);
+        ValidatedPartyStatement combinedStatement = PartyReportProjectionBuilder.BuildStatement(
+            combinedSource,
+            "party.account.detail",
+            Guid.CreateVersion7(),
+            1,
+            combinedGenerationId,
+            combinedGeneratedAt);
+        PartyControlAccountEvidence combinedControl =
+            await postgresControlSource.LoadAsync(combinedSource, combinedStatement.ReportSlice)
+            ?? throw new InvalidOperationException("Combined Party control-account evidence was not returned.");
+        ControlAccountReconciliationResult combinedReconciliation = ControlAccountReconciliationResult.Create(
+            Guid.CreateVersion7(), combinedControl.Subledger, combinedControl.GeneralLedger);
+        Assert(combinedReconciliation.IsReconciled &&
+               combinedControl.Subledger.Debits == 110m && combinedControl.Subledger.Credits == 10m &&
+               combinedControl.Subledger.ClosingBalance == 100m &&
+               combinedControl.GeneralLedger.Debits == 110m && combinedControl.GeneralLedger.Credits == 10m &&
+               combinedControl.GeneralLedger.ClosingBalance == 100m,
+            "Opening, due, allocation and unallocation did not cross-foot to the exact GL control account.");
+        var deniedControlSource = new PostgresPartyControlAccountEvidenceSource(
+            appDataSource,
+            new ExecutionScope(tenantId, actorId, [otherCompanyId]),
+            LoadPartyGeneralLedgerEvidenceAsync);
+        await ThrowsAsync<ExecutionScopeDeniedException>(() =>
+            deniedControlSource.LoadAsync(combinedSource, combinedStatement.ReportSlice).AsTask());
+        await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
+        {
+            await SetAuditScopeAsync(connection, transaction, tenantId, actorId, companyId);
+            PostedControlAccountEvidenceException missingControlLine =
+                await ThrowsAsync<PostedControlAccountEvidenceException>(() =>
+                    PostgresPostedControlAccountBalanceEvidenceLoader.LoadAsync(
+                        connection,
+                        transaction,
+                        reportScope,
+                        companyId,
+                        Guid.CreateVersion7(),
+                        combinedSource.Currency,
+                        combinedSource.EffectiveAsOf,
+                        combinedSource.RecordedCutoff,
+                        combinedSource.PostingLineage.Select(item =>
+                            new PostedControlAccountLineageReference(
+                                item.JournalId,
+                                item.SourceType,
+                                item.SourceEventId,
+                                item.SourceVersion,
+                                item.PostingPurpose,
+                                item.EffectiveDate,
+                                item.RecordedAt,
+                                item.PostedAt))).AsTask());
+            Assert(missingControlLine.Code == "POSTED_CONTROL_ACCOUNT_LINEAGE_INCOMPLETE",
+                "Exact GL evidence accepted Party journals without the selected control-account line.");
+            PostedControlAccountEvidenceException wrongCurrency =
+                await ThrowsAsync<PostedControlAccountEvidenceException>(() =>
+                    PostgresPostedControlAccountBalanceEvidenceLoader.LoadAsync(
+                        connection,
+                        transaction,
+                        reportScope,
+                        companyId,
+                        controlAccountId,
+                        "USD",
+                        combinedSource.EffectiveAsOf,
+                        combinedSource.RecordedCutoff,
+                        combinedSource.PostingLineage.Select(item =>
+                            new PostedControlAccountLineageReference(
+                                item.JournalId,
+                                item.SourceType,
+                                item.SourceEventId,
+                                item.SourceVersion,
+                                item.PostingPurpose,
+                                item.EffectiveDate,
+                                item.RecordedAt,
+                                item.PostedAt))).AsTask());
+            Assert(wrongCurrency.Code == "POSTED_CONTROL_ACCOUNT_CURRENCY_EVIDENCE_MISMATCH",
+                "GL evidence silently interpreted a different transaction currency as the Party currency.");
+            await transaction.RollbackAsync();
+        }
 
         var impactJournalReversal = KaguERP.Modules.Accounting.Domain.Reversals.JournalReversalDraft.Create(
             impactJournalId,
@@ -4498,9 +5455,10 @@ internal static class DatabaseIntegrationCheck
         Guid actorId)
     {
         var currency = TreasuryCurrencyCode.Create("GBP");
-        SameCurrencyPaymentRateSnapshot rate = SameCurrencyPaymentRateSnapshot.Create(
+        PaymentRateSnapshot rate = PaymentRateSnapshot.Create(
             tenantId, companyId, Guid.CreateVersion7(), 1, currency, currency,
-            "identity", "company-base", new DateOnly(2026, 8, 26), 1m, 1m);
+            "identity", "company-base", new DateOnly(2026, 8, 26), 1m, 1m,
+            Guid.CreateVersion7(), 1, 2);
         ValidatedPaymentEconomicEventDraft payment = ValidatedPaymentEconomicEventDraft.Create(
             Guid.CreateVersion7(), tenantId, companyId, Guid.CreateVersion7(), Guid.CreateVersion7(),
             PaymentDirection.Incoming, 100m, 100m, new DateOnly(2026, 8, 26),
@@ -4820,7 +5778,8 @@ internal static class DatabaseIntegrationCheck
     {
         var scope = new ExecutionScope(tenantId, actorId, [companyId]);
         FinancialReportSlice slice = FinancialReportSlice.Create(
-            tenantId, companyId, "party-aging", 1, new DateOnly(2026, 8, 25),
+            tenantId, companyId, PartyAccountDetailReportDefinition.ReportCode,
+            PartyAccountDetailReportDefinition.Version, new DateOnly(2026, 8, 25),
             new DateTimeOffset(2026, 8, 25, 20, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2026, 8, 25, 20, 1, 0, TimeSpan.Zero), Guid.CreateVersion7(),
             ReportCurrencyCode.Create("GBP"),
@@ -4930,15 +5889,17 @@ internal static class DatabaseIntegrationCheck
                    crossFoot.Statement.ClosingExposure == crossFoot.Aging.TotalRemaining &&
                    crossFoot.Statement.ReportSlice.ProjectionGenerationId == slice.ProjectionGenerationId,
                 "Authoritative Party report composition did not exact-cross-foot the same projection slice.");
-            const string fixtureReportPermission = "fixture.party-report.query";
             var permittedReportScope = new ExecutionScope(
-                tenantId, actorId, [new CompanyAccess(companyId, [fixtureReportPermission])]);
+                tenantId,
+                actorId,
+                [new CompanyAccess(companyId, [PartyAccountDetailReportDefinition.ViewPermission])]);
             PartyStatementAgingCrossFoot? authorizedCrossFoot = await AuthorizedPartyReportQuery.ExecuteAsync(
                 connection,
                 transaction,
                 new AuthorizedPartyReportQueryRequest(
-                    permittedReportScope, companyId, fixtureReportPermission, Guid.CreateVersion7(),
-                    statement.StatementId, agingReport.AgingReportId));
+                    permittedReportScope, companyId, PartyAccountDetailReportDefinition.ReportCode,
+                    PartyAccountDetailReportDefinition.Version, PartyAccountDetailReportDefinition.ViewPermission,
+                    Guid.CreateVersion7(), statement.StatementId, agingReport.AgingReportId));
             Assert(authorizedCrossFoot is not null,
                 "Permission-first Party report query did not load an allowed authoritative projection.");
             PartyReportQueryDeniedException denied = await ThrowsAsync<PartyReportQueryDeniedException>(() =>
@@ -4946,8 +5907,9 @@ internal static class DatabaseIntegrationCheck
                     connection,
                     transaction,
                     new AuthorizedPartyReportQueryRequest(
-                        scope, companyId, fixtureReportPermission, Guid.CreateVersion7(),
-                        Guid.CreateVersion7(), Guid.CreateVersion7())).AsTask());
+                        scope, companyId, PartyAccountDetailReportDefinition.ReportCode,
+                        PartyAccountDetailReportDefinition.Version, PartyAccountDetailReportDefinition.ViewPermission,
+                        Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7())).AsTask());
             Assert(denied.Code == "PARTY_REPORT_QUERY_DENIED",
                 "Party report query did not deny missing permission before resource lookup.");
             var reportAuditContext = new RequestAuditContext(
@@ -4956,10 +5918,12 @@ internal static class DatabaseIntegrationCheck
             PartyStatementAgingCrossFoot? auditedCrossFoot = await AuditedPartyReportQuery.ExecuteAsync(
                 connection,
                 transaction,
-                new AuditedPartyReportQueryRequest(
-                    new AuthorizedPartyReportQueryRequest(
-                        permittedReportScope, companyId, fixtureReportPermission, Guid.CreateVersion7(),
-                        statement.StatementId, agingReport.AgingReportId),
+                    new AuditedPartyReportQueryRequest(
+                        new AuthorizedPartyReportQueryRequest(
+                            permittedReportScope, companyId, PartyAccountDetailReportDefinition.ReportCode,
+                            PartyAccountDetailReportDefinition.Version,
+                            PartyAccountDetailReportDefinition.ViewPermission, Guid.CreateVersion7(),
+                            statement.StatementId, agingReport.AgingReportId),
                     reportAuditContext,
                     allowedAuditId),
                 PostgresAuthorizationAuditWriter.AppendAsync);
@@ -4969,24 +5933,54 @@ internal static class DatabaseIntegrationCheck
             await ThrowsAsync<PartyReportQueryDeniedException>(() => AuditedPartyReportQuery.ExecuteAsync(
                 connection,
                 transaction,
-                new AuditedPartyReportQueryRequest(
-                    new AuthorizedPartyReportQueryRequest(
-                        scope, companyId, fixtureReportPermission, Guid.CreateVersion7(),
-                        Guid.CreateVersion7(), Guid.CreateVersion7()),
+                    new AuditedPartyReportQueryRequest(
+                        new AuthorizedPartyReportQueryRequest(
+                            scope, companyId, PartyAccountDetailReportDefinition.ReportCode,
+                            PartyAccountDetailReportDefinition.Version,
+                            PartyAccountDetailReportDefinition.ViewPermission, Guid.CreateVersion7(),
+                            Guid.CreateVersion7(), Guid.CreateVersion7()),
                     reportAuditContext,
                     deniedAuditId),
                 PostgresAuthorizationAuditWriter.AppendAsync).AsTask());
             await ThrowsAsync<InvalidOperationException>(() => AuditedPartyReportQuery.ExecuteAsync(
                 connection,
                 transaction,
-                new AuditedPartyReportQueryRequest(
-                    new AuthorizedPartyReportQueryRequest(
-                        permittedReportScope, companyId, fixtureReportPermission, Guid.CreateVersion7(),
-                        statement.StatementId, agingReport.AgingReportId),
+                    new AuditedPartyReportQueryRequest(
+                        new AuthorizedPartyReportQueryRequest(
+                            permittedReportScope, companyId, PartyAccountDetailReportDefinition.ReportCode,
+                            PartyAccountDetailReportDefinition.Version,
+                            PartyAccountDetailReportDefinition.ViewPermission, Guid.CreateVersion7(),
+                            statement.StatementId, agingReport.AgingReportId),
                     reportAuditContext,
                     Guid.CreateVersion7()),
                 static (_, _, _, _, _, _) => ValueTask.FromException(
                     new InvalidOperationException("Forced audit failure."))).AsTask());
+            PartyStatementAgingCrossFoot? wrongDefinition = await AuditedPartyReportQuery.ExecuteAsync(
+                connection,
+                transaction,
+                new AuditedPartyReportQueryRequest(
+                    new AuthorizedPartyReportQueryRequest(
+                        permittedReportScope, companyId, "party.account.other",
+                        PartyAccountDetailReportDefinition.Version,
+                        PartyAccountDetailReportDefinition.ViewPermission, Guid.CreateVersion7(),
+                        statement.StatementId, agingReport.AgingReportId),
+                    reportAuditContext,
+                    Guid.CreateVersion7()),
+                PostgresAuthorizationAuditWriter.AppendAsync);
+            Assert(wrongDefinition is null,
+                "Party report query returned a projection for a different route definition.");
+            await ThrowsAsync<PartyReportQueryDeniedException>(() => AuditedPartyReportQuery.ExecuteAsync(
+                connection,
+                transaction,
+                new AuditedPartyReportQueryRequest(
+                    new AuthorizedPartyReportQueryRequest(
+                        permittedReportScope, otherCompanyId, PartyAccountDetailReportDefinition.ReportCode,
+                        PartyAccountDetailReportDefinition.Version,
+                        PartyAccountDetailReportDefinition.ViewPermission, Guid.CreateVersion7(),
+                        statement.StatementId, agingReport.AgingReportId),
+                    reportAuditContext,
+                    Guid.CreateVersion7()),
+                PostgresAuthorizationAuditWriter.AppendAsync).AsTask());
             ControlAccountBalanceProjectionPersistenceResult subledgerFirst =
                 await PostgresControlAccountBalanceProjectionWriter.PersistAsync(
                     connection, transaction, scope, subledgerBalance);
@@ -5091,6 +6085,127 @@ internal static class DatabaseIntegrationCheck
             Assert(hiddenDrillDown is null,
                 "Party statement drill-down exposed another company's projection row.");
             await transaction.CommitAsync();
+        }
+
+        var productionReportScope = new ExecutionScope(
+            tenantId,
+            actorId,
+            [new CompanyAccess(companyId, [PartyAccountDetailReportDefinition.ViewPermission])]);
+        var productionAuditContext = new RequestAuditContext(
+            Guid.CreateVersion7(),
+            "trace-party-report-executor",
+            tenantId,
+            actorId,
+            new HashSet<Guid> { companyId },
+            null);
+        var executor = new PostgresAuditedPartyReportQueryExecutor(
+            appDataSource,
+            productionReportScope,
+            productionAuditContext,
+            PostgresAuthorizationAuditWriter.AppendAsync);
+        Guid executorAuditId = Guid.CreateVersion7();
+        PartyStatementAgingCrossFoot? executorResult = await executor.ExecuteAsync(
+            new PostgresPartyReportQuery(
+                companyId,
+                PartyAccountDetailReportDefinition.ReportCode,
+                PartyAccountDetailReportDefinition.Version,
+                PartyAccountDetailReportDefinition.ViewPermission,
+                Guid.CreateVersion7(),
+                statement.StatementId,
+                agingReport.AgingReportId,
+                executorAuditId));
+        Assert(executorResult is not null && executorResult.Statement.StatementId == statement.StatementId &&
+               executorResult.Aging.AgingReportId == agingReport.AgingReportId,
+            "Transaction-owning Party report query did not return the authorized persisted projection.");
+        Guid deniedExecutorAuditId = Guid.CreateVersion7();
+        var deniedExecutor = new PostgresAuditedPartyReportQueryExecutor(
+            appDataSource,
+            scope,
+            productionAuditContext,
+            PostgresAuthorizationAuditWriter.AppendAsync);
+        await ThrowsAsync<PartyReportQueryDeniedException>(() => deniedExecutor.ExecuteAsync(
+            new PostgresPartyReportQuery(
+                companyId,
+                PartyAccountDetailReportDefinition.ReportCode,
+                PartyAccountDetailReportDefinition.Version,
+                PartyAccountDetailReportDefinition.ViewPermission,
+                Guid.CreateVersion7(),
+                statement.StatementId,
+                agingReport.AgingReportId,
+                deniedExecutorAuditId)).AsTask());
+        Guid missingExecutorAuditId = Guid.CreateVersion7();
+        PartyStatementAgingCrossFoot? missingExecutorResult = await executor.ExecuteAsync(
+            new PostgresPartyReportQuery(
+                companyId,
+                PartyAccountDetailReportDefinition.ReportCode,
+                PartyAccountDetailReportDefinition.Version,
+                PartyAccountDetailReportDefinition.ViewPermission,
+                Guid.CreateVersion7(),
+                Guid.CreateVersion7(),
+                Guid.CreateVersion7(),
+                missingExecutorAuditId));
+        Assert(missingExecutorResult is null,
+            "Transaction-owning Party report query did not keep a missing projection fail-closed.");
+
+        var productionQuery = new PostgresPartyAccountDetailReportQuery(
+            appDataSource,
+            new FixedExecutionScopeAccessor(productionReportScope),
+            new FixedRequestAuditContextAccessor(productionAuditContext),
+            PostgresAuthorizationAuditWriter.AppendAsync);
+        PartyAccountDetailReportQueryResult productionResult = await productionQuery.ExecuteAsync(
+            new PartyAccountDetailReportQueryRequest(
+                companyId,
+                statement.StatementId,
+                agingReport.AgingReportId));
+        Assert(productionResult.Outcome == PartyAccountDetailReportQueryOutcome.Allowed &&
+               productionResult.Report?.StatementId == statement.StatementId &&
+               productionResult.Report.AgingReportId == agingReport.AgingReportId &&
+               productionResult.Report.ReportCode == PartyAccountDetailReportDefinition.ReportCode &&
+               productionResult.Report.ClosingExposure == productionResult.Report.AgingTotalRemaining,
+            "Production Party report application query did not map the authorized persisted projection.");
+        var deniedProductionQuery = new PostgresPartyAccountDetailReportQuery(
+            appDataSource,
+            new FixedExecutionScopeAccessor(scope),
+            new FixedRequestAuditContextAccessor(productionAuditContext),
+            PostgresAuthorizationAuditWriter.AppendAsync);
+        PartyAccountDetailReportQueryResult deniedProductionResult = await deniedProductionQuery.ExecuteAsync(
+            new PartyAccountDetailReportQueryRequest(
+                companyId,
+                statement.StatementId,
+                agingReport.AgingReportId));
+        Assert(deniedProductionResult.Outcome == PartyAccountDetailReportQueryOutcome.Denied &&
+               deniedProductionResult.Report is null,
+            "Production Party report application query did not return a typed permission denial.");
+        PartyAccountDetailReportQueryResult missingProductionResult = await productionQuery.ExecuteAsync(
+            new PartyAccountDetailReportQueryRequest(
+                companyId,
+                Guid.CreateVersion7(),
+                Guid.CreateVersion7()));
+        Assert(missingProductionResult.Outcome == PartyAccountDetailReportQueryOutcome.NotFound &&
+               missingProductionResult.Report is null,
+            "Production Party report application query did not keep a missing projection fail-closed.");
+
+        await using (NpgsqlConnection auditConnection = await migratorDataSource.OpenConnectionAsync())
+        await using (NpgsqlTransaction auditTransaction = await auditConnection.BeginTransactionAsync())
+        {
+            await ExecuteAsync(auditConnection, auditTransaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+            Assert(await CountAsync(
+                       auditConnection,
+                       auditTransaction,
+                       "SELECT count(*) FROM platform.audit_event WHERE id=$1 AND outcome='allowed' AND reason_code='PARTY_REPORT_QUERY_ALLOWED'",
+                       executorAuditId) == 1 &&
+                   await CountAsync(
+                       auditConnection,
+                       auditTransaction,
+                       "SELECT count(*) FROM platform.audit_event WHERE id=$1 AND outcome='denied' AND reason_code='PARTY_REPORT_QUERY_DENIED'",
+                       deniedExecutorAuditId) == 1 &&
+                   await CountAsync(
+                       auditConnection,
+                       auditTransaction,
+                       "SELECT count(*) FROM platform.audit_event WHERE id=$1 AND outcome='denied' AND reason_code='PARTY_REPORT_NOT_FOUND'",
+                       missingExecutorAuditId) == 1,
+                "Transaction-owning Party report query did not atomically retain allowed/denied/not-found audit facts.");
+            await auditTransaction.CommitAsync();
         }
 
         await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
@@ -5351,6 +6466,133 @@ internal static class DatabaseIntegrationCheck
                    exception.ConstraintName == "ck_party_statement_projection_line_count",
                 "Database accepted a party statement projection with a mismatched line count.");
         }
+    }
+
+    private static async Task AssertPersistedPartyGoldenAsync(
+        NpgsqlDataSource appDataSource,
+        ExecutionScope scope,
+        Guid companyId,
+        Guid crossFootId,
+        Guid statementId,
+        Guid agingReportId,
+        Guid reconciliationId,
+        Guid projectionGenerationId,
+        decimal expectedClosing)
+    {
+        await using NpgsqlConnection connection = await appDataSource.OpenConnectionAsync();
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+        await SetAuditScopeAsync(connection, transaction, scope.TenantId, scope.ActorId, companyId);
+        PartyStatementAgingCrossFoot? crossFoot = await PostgresPartyReportCrossFootLoader.LoadAsync(
+            connection,
+            transaction,
+            scope,
+            companyId,
+            crossFootId,
+            statementId,
+            agingReportId);
+        Assert(crossFoot is not null && crossFoot.Statement.ClosingExposure == expectedClosing &&
+               crossFoot.Aging.TotalRemaining == expectedClosing,
+            "Persisted Party statement and aging did not retain the golden cross-foot total.");
+
+        var snapshotIds = new Dictionary<LedgerSide, Guid>();
+        const string sql = """
+            SELECT ledger_side, snapshot_id
+            FROM reporting.control_account_balance_projection
+            WHERE tenant_id=$1 AND company_id=$2 AND projection_generation_id=$3
+            ORDER BY ledger_side
+            """;
+        await using (var command = new NpgsqlCommand(sql, connection, transaction))
+        {
+            command.Parameters.AddWithValue(scope.TenantId);
+            command.Parameters.AddWithValue(companyId);
+            command.Parameters.AddWithValue(projectionGenerationId);
+            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                snapshotIds.Add((LedgerSide)reader.GetInt16(0), reader.GetGuid(1));
+            }
+        }
+        Assert(snapshotIds.Count == 2 && snapshotIds.ContainsKey(LedgerSide.Subledger) &&
+               snapshotIds.ContainsKey(LedgerSide.GeneralLedger),
+            "Golden generation did not persist both control-account ledger sides.");
+        ControlAccountReconciliationResult? reconciliation =
+            await PostgresControlAccountReconciliationLoader.LoadAsync(
+                connection,
+                transaction,
+                scope,
+                companyId,
+                reconciliationId,
+                snapshotIds[LedgerSide.Subledger],
+                snapshotIds[LedgerSide.GeneralLedger]);
+        Assert(reconciliation is not null && reconciliation.IsReconciled &&
+               reconciliation.Subledger.ClosingBalance == expectedClosing &&
+               reconciliation.GeneralLedger.ClosingBalance == expectedClosing,
+            "Persisted Party subledger and exact GL control-account evidence did not reconcile.");
+        await transaction.CommitAsync();
+    }
+
+    private static DateTimeOffset ToPostgresTimestamp(DateTimeOffset value)
+    {
+        if (value.Offset != TimeSpan.Zero)
+        {
+            throw new ArgumentException("PostgreSQL test timestamps must use the UTC offset.", nameof(value));
+        }
+        return value.AddTicks(-(value.Ticks % TimeSpan.TicksPerMicrosecond));
+    }
+
+    private static async ValueTask<PartyGeneralLedgerControlAccountEvidence>
+        LoadPartyGeneralLedgerEvidenceAsync(
+            NpgsqlConnection connection,
+            NpgsqlTransaction transaction,
+            ExecutionScope scope,
+            PartyReportSourceBatch source,
+            CancellationToken cancellationToken)
+    {
+        PostedControlAccountBalanceEvidence evidence =
+            await PostgresPostedControlAccountBalanceEvidenceLoader.LoadAsync(
+                connection,
+                transaction,
+                scope,
+                source.CompanyId,
+                source.ControlAccountId,
+                source.Currency,
+                source.EffectiveAsOf,
+                source.RecordedCutoff,
+                source.PostingLineage.Select(item => new PostedControlAccountLineageReference(
+                    item.JournalId,
+                    item.SourceType,
+                    item.SourceEventId,
+                    item.SourceVersion,
+                    item.PostingPurpose,
+                    item.EffectiveDate,
+                    item.RecordedAt,
+                    item.PostedAt)),
+                cancellationToken);
+        return new PartyGeneralLedgerControlAccountEvidence(
+            evidence.TenantId,
+            evidence.CompanyId,
+            evidence.ControlAccountId,
+            evidence.Currency,
+            evidence.EffectiveAsOf,
+            evidence.RecordedCutoff,
+            evidence.OpeningBalance,
+            evidence.Debits,
+            evidence.Credits,
+            evidence.ClosingBalance,
+            evidence.RowCount,
+            evidence.SourceChecksumSha256);
+    }
+
+    private sealed class FixedPartyAgingPolicySource(CalendarDayAgingPolicySnapshot policy)
+        : IPartyAgingPolicySource
+    {
+        public ValueTask<CalendarDayAgingPolicySnapshot?> LoadAsync(
+            Guid tenantId,
+            Guid companyId,
+            DateOnly effectiveAsOf,
+            DateTimeOffset recordedCutoff,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<CalendarDayAgingPolicySnapshot?>(policy);
     }
 
     private static JournalPreparationRequest CreatePreparationRequestForDraft(
@@ -6087,6 +7329,8 @@ internal static class DatabaseIntegrationCheck
 
         foreach (string table in new[]
                  {
+                     "reporting.aging_policy_definition_bucket",
+                     "reporting.aging_policy_definition",
                      "reporting.control_account_balance_projection",
                      "reporting.party_aging_projection_item",
                      "reporting.party_aging_projection",
@@ -6306,6 +7550,46 @@ internal static class DatabaseIntegrationCheck
             await auditCommand.ExecuteNonQueryAsync();
         }
 
+        await using (var reportRefreshEventCommand = new NpgsqlCommand(
+            "DELETE FROM reporting.party_report_refresh_event WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            reportRefreshEventCommand.Parameters.AddWithValue(tenantA);
+            reportRefreshEventCommand.Parameters.AddWithValue(tenantB);
+            await reportRefreshEventCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var reportRefreshWorkCommand = new NpgsqlCommand(
+            "DELETE FROM reporting.party_report_refresh_work_item WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            reportRefreshWorkCommand.Parameters.AddWithValue(tenantA);
+            reportRefreshWorkCommand.Parameters.AddWithValue(tenantB);
+            await reportRefreshWorkCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var servicePermissionCommand = new NpgsqlCommand(
+            "DELETE FROM iam.service_identity_company_permission WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            servicePermissionCommand.Parameters.AddWithValue(tenantA);
+            servicePermissionCommand.Parameters.AddWithValue(tenantB);
+            await servicePermissionCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var serviceIdentityCommand = new NpgsqlCommand(
+            "DELETE FROM iam.service_identity WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            serviceIdentityCommand.Parameters.AddWithValue(tenantA);
+            serviceIdentityCommand.Parameters.AddWithValue(tenantB);
+            await serviceIdentityCommand.ExecuteNonQueryAsync();
+        }
+
         await using (var permissionCommand = new NpgsqlCommand(
             "DELETE FROM iam.user_company_permission WHERE tenant_id = $1 OR tenant_id = $2",
             connection,
@@ -6350,6 +7634,17 @@ internal static class DatabaseIntegrationCheck
     {
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         await command.ExecuteNonQueryAsync();
+    }
+
+    private sealed class FixedExecutionScopeAccessor(ExecutionScope current) : IExecutionScopeAccessor
+    {
+        public ExecutionScope Current { get; } = current;
+    }
+
+    private sealed class FixedRequestAuditContextAccessor(RequestAuditContext current)
+        : IRequestAuditContextAccessor
+    {
+        public RequestAuditContext Current { get; } = current;
     }
 
     private static void Assert(bool condition, string message)
