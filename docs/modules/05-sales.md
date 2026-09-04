@@ -24,6 +24,16 @@ Teklif, satış siparişi, stok rezervasyonu, sevk/irsaliye, fatura, iade ve ilg
 
 ## 4. Sipariş
 
+- `SALES-ORD-001`: Sipariş lifecycle geçişi exact expected version, actor, UTC occurrence ve correlation olmadan uygulanamaz; her geçiş previous/new state ve version taşıyan append-only olay üretir.
+- `SALES-ORD-002`: Sipariş commitment'tır; confirm tek başına stok hareketi, gelir, cari açık kalem veya GL kaydı üretmez.
+- `SALES-ORD-003`: Sipariş current projection'ı tenant/company forced RLS altında exact `+1`
+  optimistic version ile güncellenir; her update aynı transaction'daki immutable transition
+  event ile birebir doğrulanır. Correlation tekrarında immutable komut içeriği aynıysa ilk sonuç
+  döner, farklıysa conflict oluşur.
+- `SALES-ORD-004`: Sipariş detay okuması `sales.order.view` permission ve company scope ister;
+  current state ile version sıralı transition timeline aynı caller transaction'ında okunur ve
+  eksik, sıra dışı veya current state ile uyuşmayan geçmiş fail-closed reddedilir.
+
 Durum:
 
 `draft → submitted → approved → confirmed → partially_fulfilled → fulfilled → closed`.
@@ -107,7 +117,9 @@ Hesaplar posting rule ile item/revenue/tax/party group ve boyutlara göre.
 ## 11. Yetkiler
 
 - `sales-quote.create/send`.
-- `sales-order.create/submit/approve/confirm/cancel`.
+- `sales.order.view/create/submit/approve/confirm/cancel/close`.
+- `sales.fulfilment.record` yalnız persisted order-line→dispatch-line allocation evidence'ı
+  hazır olduğunda açılır; şu anda Application sınırında fail-closed'dur.
 - `sales.price.override`, `sales.discount.approve`, `sales.margin.view`.
 - `dispatch.create/post` warehouse scope.
 - `sales-invoice.create/post/reverse`.
@@ -161,6 +173,8 @@ GET  /api/v1/sales-orders/{id}/document-chain
 - [ ] Yetkisiz depo/maliyet/company verisi sızmıyor.
 
 ## 16. Taahhüt–gerçekleşme ve satır bağlantısı
+
+- `SALES-FUL-001`: Partial/full fulfilment durumu yalnız aynı tenant/company/order kapsamındaki unique order-line→dispatch-line allocation miktarlarından türetilir; toplam base quantity sipariş satırını aşamaz.
 
 SalesOrder bir commitment’tır; stok veya gelir olayını tek başına yaratmaz. Dispatch/Delivery stok ekonomik olayı, SalesInvoice alacak/vergi olayı, Payment nakit olayıdır. Bu olayların tarihleri ve durumları birleşmez.
 

@@ -37,6 +37,12 @@
   <Folder Name="/src/Modules/Inventory/Inventory.Domain/">
     <Project Path="src/Modules/Inventory/Inventory.Domain/KaguERP.Modules.Inventory.Domain.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Inventory/Inventory.Application/">
+    <Project Path="src/Modules/Inventory/Inventory.Application/KaguERP.Modules.Inventory.Application.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Inventory/Inventory.Infrastructure/">
+    <Project Path="src/Modules/Inventory/Inventory.Infrastructure/KaguERP.Modules.Inventory.Infrastructure.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Parties/Parties.Domain/">
     <Project Path="src/Modules/Parties/Parties.Domain/KaguERP.Modules.Parties.Domain.csproj" />
   </Folder>
@@ -51,6 +57,15 @@
   </Folder>
   <Folder Name="/src/Modules/Reporting/Reporting.Domain/">
     <Project Path="src/Modules/Reporting/Reporting.Domain/KaguERP.Modules.Reporting.Domain.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Sales/Sales.Domain/">
+    <Project Path="src/Modules/Sales/Sales.Domain/KaguERP.Modules.Sales.Domain.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Sales/Sales.Application/">
+    <Project Path="src/Modules/Sales/Sales.Application/KaguERP.Modules.Sales.Application.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Sales/Sales.Infrastructure/">
+    <Project Path="src/Modules/Sales/Sales.Infrastructure/KaguERP.Modules.Sales.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/src/Modules/Reporting/Reporting.Application/">
     <Project Path="src/Modules/Reporting/Reporting.Application/KaguERP.Modules.Reporting.Application.csproj" />

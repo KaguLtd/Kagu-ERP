@@ -90,6 +90,44 @@
       "kaguerp.buildingblocks.domain": {
         "type": "Project"
       },
+      "kaguerp.modules.inventory.application": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Inventory.Domain": "[1.0.0, )"
+        }
+      },
+      "kaguerp.modules.inventory.domain": {
+        "type": "Project"
+      },
+      "kaguerp.modules.inventory.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Inventory.Application": "[1.0.0, )",
+          "KaguERP.Modules.Inventory.Domain": "[1.0.0, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
+      "kaguerp.modules.sales.application": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Sales.Domain": "[1.0.0, )"
+        }
+      },
+      "kaguerp.modules.sales.domain": {
+        "type": "Project"
+      },
+      "kaguerp.modules.sales.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Sales.Application": "[1.0.0, )",
+          "KaguERP.Modules.Sales.Domain": "[1.0.0, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
       "Microsoft.AspNetCore.Authentication.JwtBearer": {
         "type": "CentralTransitive",
         "requested": "[10.0.11, )",

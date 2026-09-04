@@ -25,7 +25,8 @@ public sealed record StockMovementDraft
         long sequenceKey,
         StockMovementSourceIdentity source,
         Guid? transferId,
-        Guid? counterpartWarehouseId)
+        Guid? counterpartWarehouseId,
+        Guid? reversalOfMovementId)
     {
         MovementId = movementId;
         TenantId = tenantId;
@@ -41,6 +42,7 @@ public sealed record StockMovementDraft
         Source = source;
         TransferId = transferId;
         CounterpartWarehouseId = counterpartWarehouseId;
+        ReversalOfMovementId = reversalOfMovementId;
     }
 
     public Guid MovementId { get; }
@@ -58,6 +60,7 @@ public sealed record StockMovementDraft
     public StockMovementSourceIdentity Source { get; }
     public Guid? TransferId { get; }
     public Guid? CounterpartWarehouseId { get; }
+    public Guid? ReversalOfMovementId { get; }
 
     public static StockMovementDraft Create(
         Guid movementId,
@@ -73,7 +76,8 @@ public sealed record StockMovementDraft
         long sequenceKey,
         StockMovementSourceIdentity source,
         Guid? transferId = null,
-        Guid? counterpartWarehouseId = null)
+        Guid? counterpartWarehouseId = null,
+        Guid? reversalOfMovementId = null)
     {
         RequireId(movementId, "INVENTORY_MOVEMENT_ID_REQUIRED", "Inventory movement ID is required.");
         RequireId(tenantId, "INVENTORY_MOVEMENT_TENANT_REQUIRED", "Inventory movement tenant is required.");
@@ -133,6 +137,12 @@ public sealed record StockMovementDraft
                 "INVENTORY_NON_TRANSFER_CONTEXT_INVALID",
                 "Non-transfer movements cannot carry transfer context.");
         }
+        if (reversalOfMovementId == Guid.Empty || reversalOfMovementId == movementId)
+        {
+            throw new InventoryInvariantException(
+                "INVENTORY_MOVEMENT_REVERSAL_REFERENCE_INVALID",
+                "A reversal must reference a distinct non-empty stock movement.");
+        }
 
         return new StockMovementDraft(
             movementId,
@@ -148,7 +158,8 @@ public sealed record StockMovementDraft
             sequenceKey,
             source,
             transferId,
-            counterpartWarehouseId);
+            counterpartWarehouseId,
+            reversalOfMovementId);
     }
 
     private static void RequireId(Guid id, string code, string message)

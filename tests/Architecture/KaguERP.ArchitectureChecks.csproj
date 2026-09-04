@@ -10,6 +10,12 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Inventory\Inventory.Domain\KaguERP.Modules.Inventory.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Inventory\Inventory.Application\KaguERP.Modules.Inventory.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Inventory\Inventory.Infrastructure\KaguERP.Modules.Inventory.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Sales\Sales.Domain\KaguERP.Modules.Sales.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Sales\Sales.Application\KaguERP.Modules.Sales.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Sales\Sales.Infrastructure\KaguERP.Modules.Sales.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Modules\Accounting\Accounting.Application\KaguERP.Modules.Accounting.Application.csproj"
                       ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\Modules\Accounting\Accounting.Domain\KaguERP.Modules.Accounting.Domain.csproj"
@@ -81,6 +87,10 @@
              LinkBase="Treasury.Infrastructure" />
     <Compile Include="..\Integration\AuthSmokeFixture.cs" Link="Database\AuthSmokeFixture.cs" />
     <Compile Include="..\Integration\DatabaseIntegrationCheck.cs" Link="Database\DatabaseIntegrationCheck.cs" />
+    <Compile Include="..\Integration\InventoryDatabaseIntegrationCheck.cs"
+             Link="Database\InventoryDatabaseIntegrationCheck.cs" />
+    <Compile Include="..\Integration\SalesDatabaseIntegrationCheck.cs"
+             Link="Database\SalesDatabaseIntegrationCheck.cs" />
     <Compile Include="..\..\src\Erp.Bootstrap\*.cs"
              Exclude="..\..\src\Erp.Bootstrap\bin\**;..\..\src\Erp.Bootstrap\obj\**"
              LinkBase="Bootstrap" />

@@ -34,7 +34,8 @@ party.read
 party.create
 party.bank-account.change
 inventory.cost.view
-sales-order.submit
+inventory.transfer.post
+sales.order.submit
 invoice.post
 payment.approve
 period.reopen
@@ -46,6 +47,9 @@ security.role.assign
 - Read ve sensitive field view ayrılır.
 - Export, print ve attachment download ayrıca yetkilendirilir.
 - Permission kodu değişmez API sözleşmesidir; rename migration ister.
+- Sales sipariş lifecycle permission'ları `sales.order.view`, `sales.order.create`, `sales.order.submit`,
+  `sales.order.approve`, `sales.order.confirm`, `sales.order.cancel`, `sales.order.close`
+  ve authoritative sevk allocation'ı hazır olduğunda `sales.fulfilment.record` olarak ayrılır.
 
 ## 5. Başlangıç rol kataloğu
 
@@ -189,6 +193,10 @@ Public API method parametreleri güvenilir sayılmaz; permission kontrolünden s
 - Sistem/Şirket Yöneticisi şablonu kimlik, company ve yetki yönetimini bir araya getirebilir; bu, varsayılan olarak mali veri okuma veya journal posting hakkı vermez. İlgili mali permission açıkça atanır.
 - Tutar limitleri veri modelinde tarih etkili bulunur fakat başlangıçta limitsiz/kapalıdır. Bir limit etkinleşirse functional-currency dönüşümü ve kullanılan kur approval snapshot'ına girer.
 - Rapor görüntüleme/export ayrı permission kodlarıdır. Maliyet ve marj en az `inventory.cost.view` ile `reporting.margin.view` üzerinden diğer satış/depo verilerinden ayrı korunur.
+- Immediate depo transferi kesinleştirme yetkisi `inventory.transfer.post` kodudur; company scope'a ek olarak hem kaynak hem hedef depo scope'u zorunludur.
+- Depo bazlı fiziksel miktar görüntüleme yetkisi `inventory.quantity.view` kodudur; maliyet, değerleme, marj, rezervasyon veya başka depoları görme hakkı vermez.
+- Ürün stok hareketi ve kaynak kimliği görüntüleme yetkisi `inventory.movement.view` kodudur; yalnız atanmış depolardaki miktar hareketlerini kapsar ve maliyet/GL ayrıntısı vermez.
+- Depo kapsamı istemci veya command içindeki ID listesinden kabul edilmez. Tarih etkili `iam.user_warehouse_scope` atamaları aktif ERP actor kimliğiyle RLS altında okunur; transfer authorization evidence'ı tenant/company/actor ile birebir eşleşmeli ve hem kaynak hem hedef depoyu içermelidir.
 - Cari ekstre + aging production sorgusunun immutable görüntüleme yetkisi `reporting.party-account.view` kodudur. Bu kod yalnız yetkili company scope'undaki `party.account.detail` version `1` projection'ını okumaya izin verir; export, print, maliyet, marj veya başka şirket kapsamını genişletmez. Kaynak varlığına bakılmadan önce permission denetlenir ve reddedilen deneme hedef kimliği olmadan audit edilir.
 - `IAM-POL-002`: Background Worker insan hesabını taklit etmez. Servis kimliği kullanıcı profiliyle aynı ID'yi kullanamaz; tek tenant'a bağlı, tarih etkili ve kapatılabilir ayrı bir kimliktir. Etkin Party report yenileme kapsamı deployment allow-list'i ile `reporting.party-account.refresh` company permission kayıtlarının kesişimidir; deployment'ta istenen her şirketin aktif IAM izni bulunmalıdır. Deployment listesinde yetkisiz/fazla şirket, süresi geçmiş izin veya pasif kimlik startup/claim öncesi fail-closed olur; IAM'deki deployment dışı izin bu Worker örneğinin kapsamına girmez. Publish öncesi kapsam yeniden doğrulanır.
 - Genel kritik akış bir yönetici onayı ister; onaylayan hazırlayandan farklı kişidir. Hard-close reopen iki farklı onay gerektiren istisnadır. Kullanıcı, delegation veya admin rolü maker-checker kuralını baypas edemez.

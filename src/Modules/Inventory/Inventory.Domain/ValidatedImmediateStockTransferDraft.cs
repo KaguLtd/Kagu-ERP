@@ -54,6 +54,12 @@ public sealed record ValidatedImmediateStockTransferDraft
                 "INVENTORY_TRANSFER_WAREHOUSE_MISMATCH",
                 "Immediate transfer movement warehouse references must be reciprocal.");
         }
+        if (sourceIssue.ReversalOfMovementId.HasValue != destinationReceipt.ReversalOfMovementId.HasValue)
+        {
+            throw new InventoryInvariantException(
+                "INVENTORY_TRANSFER_REVERSAL_PAIR_INCOMPLETE",
+                "An immediate transfer reversal must link both counter movements.");
+        }
         if (!(sourceIssue.BaseQuantity + destinationReceipt.BaseQuantity).IsZero)
         {
             throw new InventoryInvariantException(

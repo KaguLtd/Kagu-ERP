@@ -38,7 +38,7 @@ using Npgsql;
 
 namespace KaguERP.DatabaseIntegrationChecks;
 
-internal static class DatabaseIntegrationCheck
+internal static partial class DatabaseIntegrationCheck
 {
     private const string MigratorConnectionVariable = "KAGU_ERP_MIGRATOR_CONNECTION_STRING";
     private const string AppConnectionVariable = "KAGU_ERP_APP_CONNECTION_STRING";
@@ -198,6 +198,10 @@ internal static class DatabaseIntegrationCheck
                 migratorDataSource, appDataSource, tenantA, companyA1, companyA2, actorId);
             await AssertProjectionGenerationPersistenceAsync(
                 migratorDataSource, appDataSource, tenantA, companyA1, companyA2, actorId);
+            await AssertInventoryQuantityMovementFoundationAsync(
+                migratorDataSource, appDataSource, tenantA, companyA1, companyA2, actorId);
+            await AssertSalesOrderLifecycleFoundationAsync(
+                appDataSource, tenantA, companyA1, companyA2, actorId);
             await AssertJournalReservationAuditOutboxAtomicityAsync(
                 migratorDataSource,
                 appDataSource,
@@ -7326,6 +7330,69 @@ internal static class DatabaseIntegrationCheck
         await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
         await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
         await ExecuteAsync(connection, transaction, "SET LOCAL ROLE kagu_erp_schema_owner");
+        await using (var salesTransitionCommand = new NpgsqlCommand(
+            "DELETE FROM sales.sales_order_transition_event WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            salesTransitionCommand.Parameters.AddWithValue(tenantA);
+            salesTransitionCommand.Parameters.AddWithValue(tenantB);
+            await salesTransitionCommand.ExecuteNonQueryAsync();
+        }
+        await using (var salesOrderCommand = new NpgsqlCommand(
+            "DELETE FROM sales.sales_order WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            salesOrderCommand.Parameters.AddWithValue(tenantA);
+            salesOrderCommand.Parameters.AddWithValue(tenantB);
+            await salesOrderCommand.ExecuteNonQueryAsync();
+        }
+        await using (var stockMovementCommand = new NpgsqlCommand(
+            "DELETE FROM inventory.stock_movement WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            stockMovementCommand.Parameters.AddWithValue(tenantA);
+            stockMovementCommand.Parameters.AddWithValue(tenantB);
+            await stockMovementCommand.ExecuteNonQueryAsync();
+        }
+        await using (var itemCompanyCommand = new NpgsqlCommand(
+            "DELETE FROM inventory.item_company WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            itemCompanyCommand.Parameters.AddWithValue(tenantA);
+            itemCompanyCommand.Parameters.AddWithValue(tenantB);
+            await itemCompanyCommand.ExecuteNonQueryAsync();
+        }
+        await using (var itemCommand = new NpgsqlCommand(
+            "DELETE FROM inventory.item WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            itemCommand.Parameters.AddWithValue(tenantA);
+            itemCommand.Parameters.AddWithValue(tenantB);
+            await itemCommand.ExecuteNonQueryAsync();
+        }
+        await using (var warehouseScopeCommand = new NpgsqlCommand(
+            "DELETE FROM iam.user_warehouse_scope WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            warehouseScopeCommand.Parameters.AddWithValue(tenantA);
+            warehouseScopeCommand.Parameters.AddWithValue(tenantB);
+            await warehouseScopeCommand.ExecuteNonQueryAsync();
+        }
+        await using (var warehouseCommand = new NpgsqlCommand(
+            "DELETE FROM org.warehouse WHERE tenant_id = $1 OR tenant_id = $2",
+            connection,
+            transaction))
+        {
+            warehouseCommand.Parameters.AddWithValue(tenantA);
+            warehouseCommand.Parameters.AddWithValue(tenantB);
+            await warehouseCommand.ExecuteNonQueryAsync();
+        }
 
         foreach (string table in new[]
                  {

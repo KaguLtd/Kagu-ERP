@@ -51,6 +51,8 @@ internal sealed class MigrationRunner(string connectionString)
         new("0040_party_statement_projection_event_scope", "0040_party_statement_projection_event_scope.sql"),
         new("0041_reconciliation_approval", "0041_reconciliation_approval.sql"),
         new("0042_payment_currency_conversion_snapshot", "0042_payment_currency_conversion_snapshot.sql"),
+        new("0043_inventory_quantity_movement_foundation", "0043_inventory_quantity_movement_foundation.sql"),
+        new("0044_sales_order_lifecycle_foundation", "0044_sales_order_lifecycle_foundation.sql"),
     ];
 
     public async Task<int> RunAsync(CancellationToken cancellationToken)

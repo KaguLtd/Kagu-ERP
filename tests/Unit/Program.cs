@@ -97,6 +97,11 @@ var checks = new (string Name, Action Run)[]
     ("INV-TRF-001 immediate transfer quantity conservation", InventoryDomainChecks.ImmediateTransferConservesQuantity),
     ("INV-BKD-001 complete backdate impact preview", InventoryDomainChecks.BackdateImpactPreviewIsComplete),
     ("INV-MST-001 scoped item and base UOM definition", InventoryDomainChecks.ItemMasterBoundariesAreEnforced),
+    ("INV-AUTH-001 transfer permission and warehouse scope", InventoryDomainChecks.TransferAuthorizationBoundariesAreEnforced),
+    ("INV-QRY-001 bitemporal on-hand query boundaries", InventoryDomainChecks.OnHandQueryBoundariesAreEnforced),
+    ("INV-QRY-002 stable movement timeline boundaries", InventoryDomainChecks.MovementQueryBoundariesAreEnforced),
+    ("SALES-ORD-001/FUL-001 versioned order and fulfilment evidence", SalesDomainChecks.OrderLifecycleIsAppendOnlyAndVersioned),
+    ("SALES-ORD-002 command authorization and persistence boundary", SalesDomainChecks.OrderCommandsEnforcePermissionAndPersistenceBoundary),
 };
 
 static void ReconciliationTransitJournalsAreExact()

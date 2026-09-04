@@ -70,6 +70,8 @@ Durum: `active → partially_consumed → consumed | released | expired`.
 
 Tek adımlı transferde source/destination movement aynı transaction. İki adımlı transferde transit sanal konum ve her aşama ayrı posted belge; toplam miktar zincirde açıklanabilir.
 
+Kesinleşmiş tek adımlı transfer yerinde değiştirilmez. Düzeltme, ters yönde yeni bir transfer ve iki original movement'e birebir `reversal_of_movement_id` bağlantısı üretir; her original hareket yalnız bir doğrudan reversal alır ve karşı miktar aynı item/warehouse/base-UOM içinde exact olmalıdır.
+
 ## 8. Lot ve seri
 
 - Item tracking policy: none/lot/serial.

@@ -1,3 +1,6 @@
+using KaguERP.BuildingBlocks.Application.Security;
+using KaguERP.Modules.Inventory.Application.Queries;
+using KaguERP.Modules.Inventory.Application.Transfers;
 using KaguERP.Modules.Inventory.Domain;
 
 internal static class InventoryDomainChecks
@@ -94,6 +97,54 @@ internal static class InventoryDomainChecks
                     transferId,
                     fixture.WarehouseId,
                     sequenceKey: 2)));
+
+        Guid reversalTransferId = Guid.NewGuid();
+        InventoryFixture reversalFixture = fixture with
+        {
+            Source = StockMovementSourceIdentity.Create(
+                fixture.TenantId,
+                fixture.CompanyId,
+                "inventory.transfer-reversal",
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                1,
+                "stock-transfer-reversal"),
+        };
+        StockMovementDraft reversalIssue = CreateMovement(
+            reversalFixture with { WarehouseId = fixture.DestinationWarehouseId },
+            StockMovementKind.TransferIssue,
+            -10.125m,
+            reversalTransferId,
+            fixture.WarehouseId,
+            sequenceKey: 3,
+            reversalOfMovementId: receipt.MovementId);
+        StockMovementDraft reversalReceipt = CreateMovement(
+            reversalFixture,
+            StockMovementKind.TransferReceipt,
+            10.125m,
+            reversalTransferId,
+            fixture.DestinationWarehouseId,
+            sequenceKey: 4,
+            reversalOfMovementId: issue.MovementId);
+        ValidatedImmediateStockTransferDraft reversal =
+            ValidatedImmediateStockTransferDraft.Create(
+                reversalTransferId,
+                reversalIssue,
+                reversalReceipt);
+        Equal(receipt.MovementId, reversal.SourceIssue.ReversalOfMovementId,
+            "Transfer reversal lost the original destination receipt link.");
+        Expect(
+            "INVENTORY_TRANSFER_REVERSAL_PAIR_INCOMPLETE",
+            () => ValidatedImmediateStockTransferDraft.Create(
+                reversalTransferId,
+                reversalIssue,
+                CreateMovement(
+                    reversalFixture,
+                    StockMovementKind.TransferReceipt,
+                    10.125m,
+                    reversalTransferId,
+                    fixture.DestinationWarehouseId,
+                    sequenceKey: 4)));
     }
 
     public static void BackdateImpactPreviewIsComplete()
@@ -226,6 +277,214 @@ internal static class InventoryDomainChecks
                 1));
     }
 
+    public static void TransferAuthorizationBoundariesAreEnforced()
+    {
+        InventoryFixture fixture = CreateFixture();
+        Guid transferId = Guid.NewGuid();
+        ValidatedImmediateStockTransferDraft transfer = ValidatedImmediateStockTransferDraft.Create(
+            transferId,
+            CreateMovement(
+                fixture,
+                StockMovementKind.TransferIssue,
+                -4m,
+                transferId,
+                fixture.DestinationWarehouseId),
+            CreateMovement(
+                fixture with { WarehouseId = fixture.DestinationWarehouseId },
+                StockMovementKind.TransferReceipt,
+                4m,
+                transferId,
+                fixture.WarehouseId,
+                sequenceKey: 2));
+        var permittedScope = new ExecutionScope(
+            fixture.TenantId,
+            Guid.NewGuid(),
+            [new CompanyAccess(
+                fixture.CompanyId,
+                [AuthorizedImmediateStockTransferCandidate.RequiredPermission])]);
+        InventoryWarehouseScopeEvidence warehouseEvidence = InventoryWarehouseScopeEvidence.Create(
+            fixture.TenantId,
+            fixture.CompanyId,
+            permittedScope.ActorId,
+            [fixture.WarehouseId, fixture.DestinationWarehouseId]);
+        AuthorizedImmediateStockTransferCandidate candidate =
+            AuthorizedImmediateStockTransferCandidate.Create(
+                permittedScope,
+                warehouseEvidence,
+                transfer);
+
+        Equal(transfer, candidate.Transfer, "Authorized candidate changed the validated transfer.");
+        ExpectAuthorization(
+            "INVENTORY_TRANSFER_PERMISSION_REQUIRED",
+            () => AuthorizedImmediateStockTransferCandidate.Create(
+                new ExecutionScope(fixture.TenantId, Guid.NewGuid(), [fixture.CompanyId]),
+                warehouseEvidence,
+                transfer));
+        ExpectAuthorization(
+            "INVENTORY_TRANSFER_WAREHOUSE_SCOPE_REQUIRED",
+            () => AuthorizedImmediateStockTransferCandidate.Create(
+                permittedScope,
+                InventoryWarehouseScopeEvidence.Create(
+                    fixture.TenantId,
+                    fixture.CompanyId,
+                    permittedScope.ActorId,
+                    [fixture.WarehouseId]),
+                transfer));
+        ExpectAuthorization(
+            "INVENTORY_TRANSFER_WAREHOUSE_EVIDENCE_MISMATCH",
+            () => AuthorizedImmediateStockTransferCandidate.Create(
+                permittedScope,
+                InventoryWarehouseScopeEvidence.Create(
+                    fixture.TenantId,
+                    fixture.CompanyId,
+                    Guid.NewGuid(),
+                    [fixture.WarehouseId, fixture.DestinationWarehouseId]),
+                transfer));
+        try
+        {
+            _ = AuthorizedImmediateStockTransferCandidate.Create(
+                new ExecutionScope(
+                    fixture.TenantId,
+                    Guid.NewGuid(),
+                    [new CompanyAccess(
+                        Guid.NewGuid(),
+                        [AuthorizedImmediateStockTransferCandidate.RequiredPermission])]),
+                warehouseEvidence,
+                transfer);
+        }
+        catch (ExecutionScopeDeniedException)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException("Cross-company transfer authorization was not rejected.");
+    }
+
+    public static void OnHandQueryBoundariesAreEnforced()
+    {
+        InventoryFixture fixture = CreateFixture();
+        Guid actorId = Guid.NewGuid();
+        var permittedScope = new ExecutionScope(
+            fixture.TenantId,
+            actorId,
+            [new CompanyAccess(fixture.CompanyId, [AuthorizedInventoryOnHandQuery.RequiredPermission])]);
+        InventoryWarehouseScopeEvidence evidence = InventoryWarehouseScopeEvidence.Create(
+            fixture.TenantId,
+            fixture.CompanyId,
+            actorId,
+            [fixture.WarehouseId]);
+        DateTimeOffset cutoff = new(2026, 9, 4, 12, 0, 0, TimeSpan.Zero);
+
+        AuthorizedInventoryOnHandQuery query = AuthorizedInventoryOnHandQuery.Create(
+            permittedScope,
+            evidence,
+            fixture.CompanyId,
+            new DateOnly(2026, 9, 4),
+            cutoff,
+            fixture.ItemId);
+        Equal(cutoff, query.RecordedCutoff, "On-hand query changed its recorded cutoff.");
+
+        ExpectOnHandAuthorization(
+            "INVENTORY_ON_HAND_PERMISSION_REQUIRED",
+            () => AuthorizedInventoryOnHandQuery.Create(
+                new ExecutionScope(fixture.TenantId, actorId, [fixture.CompanyId]),
+                evidence,
+                fixture.CompanyId,
+                new DateOnly(2026, 9, 4),
+                cutoff));
+        ExpectOnHandAuthorization(
+            "INVENTORY_ON_HAND_RECORDED_CUTOFF_NOT_UTC",
+            () => AuthorizedInventoryOnHandQuery.Create(
+                permittedScope,
+                evidence,
+                fixture.CompanyId,
+                new DateOnly(2026, 9, 4),
+                cutoff.ToOffset(TimeSpan.FromHours(3))));
+        ExpectOnHandAuthorization(
+            "INVENTORY_ON_HAND_WAREHOUSE_SCOPE_REQUIRED",
+            () => AuthorizedInventoryOnHandQuery.Create(
+                permittedScope,
+                InventoryWarehouseScopeEvidence.Create(
+                    fixture.TenantId,
+                    fixture.CompanyId,
+                    actorId,
+                    []),
+                fixture.CompanyId,
+                new DateOnly(2026, 9, 4),
+                cutoff));
+
+        var lines = new List<InventoryOnHandLine>
+        {
+            new(fixture.ItemId, fixture.WarehouseId, InventoryUomCode.Create("EA"), InventoryQuantity.Create(5m)),
+        };
+        var snapshot = new InventoryOnHandSnapshot(
+            fixture.TenantId,
+            fixture.CompanyId,
+            new DateOnly(2026, 9, 4),
+            cutoff,
+            lines);
+        lines.Clear();
+        Equal(1, snapshot.Lines.Count, "On-hand snapshot did not defensively copy its lines.");
+    }
+
+    public static void MovementQueryBoundariesAreEnforced()
+    {
+        InventoryFixture fixture = CreateFixture();
+        Guid actorId = Guid.NewGuid();
+        var permittedScope = new ExecutionScope(
+            fixture.TenantId,
+            actorId,
+            [new CompanyAccess(fixture.CompanyId, [AuthorizedInventoryMovementQuery.RequiredPermission])]);
+        InventoryWarehouseScopeEvidence evidence = InventoryWarehouseScopeEvidence.Create(
+            fixture.TenantId,
+            fixture.CompanyId,
+            actorId,
+            [fixture.WarehouseId]);
+        DateTimeOffset cutoff = new(2026, 9, 4, 12, 0, 0, TimeSpan.Zero);
+
+        AuthorizedInventoryMovementQuery query = AuthorizedInventoryMovementQuery.Create(
+            permittedScope,
+            evidence,
+            fixture.CompanyId,
+            fixture.ItemId,
+            new DateOnly(2026, 9, 1),
+            new DateOnly(2026, 9, 4),
+            cutoff,
+            200);
+        Equal(200, query.PageSize, "Movement query changed its page size.");
+
+        ExpectMovementQuery(
+            "INVENTORY_MOVEMENT_PERMISSION_REQUIRED",
+            () => AuthorizedInventoryMovementQuery.Create(
+                new ExecutionScope(fixture.TenantId, actorId, [fixture.CompanyId]),
+                evidence,
+                fixture.CompanyId,
+                fixture.ItemId,
+                new DateOnly(2026, 9, 1),
+                new DateOnly(2026, 9, 4),
+                cutoff,
+                20));
+        ExpectMovementQuery(
+            "INVENTORY_MOVEMENT_QUERY_INVALID",
+            () => AuthorizedInventoryMovementQuery.Create(
+                permittedScope,
+                evidence,
+                fixture.CompanyId,
+                fixture.ItemId,
+                new DateOnly(2026, 9, 4),
+                new DateOnly(2026, 9, 1),
+                cutoff,
+                201));
+        ExpectMovementQuery(
+            "INVENTORY_MOVEMENT_CURSOR_INVALID",
+            () => InventoryMovementCursor.Create(
+                new DateOnly(2026, 9, 4),
+                cutoff.ToOffset(TimeSpan.FromHours(3)),
+                fixture.WarehouseId,
+                1,
+                Guid.NewGuid()));
+    }
+
     private static InventoryFixture CreateFixture()
     {
         Guid tenantId = Guid.NewGuid();
@@ -252,7 +511,8 @@ internal static class InventoryDomainChecks
         decimal quantity,
         Guid? transferId = null,
         Guid? counterpartWarehouseId = null,
-        long sequenceKey = 1) =>
+        long sequenceKey = 1,
+        Guid? reversalOfMovementId = null) =>
         StockMovementDraft.Create(
             Guid.NewGuid(),
             fixture.TenantId,
@@ -267,7 +527,8 @@ internal static class InventoryDomainChecks
             sequenceKey,
             fixture.Source,
             transferId,
-            counterpartWarehouseId);
+            counterpartWarehouseId,
+            reversalOfMovementId);
 
     private static void Expect(string expectedCode, Action action)
     {
@@ -282,6 +543,49 @@ internal static class InventoryDomainChecks
         }
 
         throw new InvalidOperationException($"Expected inventory invariant {expectedCode} was not thrown.");
+    }
+
+    private static void ExpectAuthorization(string expectedCode, Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (InventoryTransferAuthorizationException exception)
+        {
+            Equal(expectedCode, exception.Code, "Unexpected inventory authorization code.");
+            return;
+        }
+
+        throw new InvalidOperationException($"Expected inventory authorization {expectedCode} was not thrown.");
+    }
+
+    private static void ExpectOnHandAuthorization(string expectedCode, Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (InventoryOnHandAuthorizationException exception) when (exception.Code == expectedCode)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"Expected inventory on-hand authorization error {expectedCode}.");
+    }
+
+    private static void ExpectMovementQuery(string expectedCode, Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (InventoryMovementQueryException exception) when (exception.Code == expectedCode)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"Expected inventory movement query error {expectedCode}.");
     }
 
     private static void Equal<T>(T expected, T actual, string message)

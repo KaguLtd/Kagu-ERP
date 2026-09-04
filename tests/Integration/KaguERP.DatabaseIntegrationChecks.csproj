@@ -11,6 +11,12 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Inventory\Inventory.Domain\KaguERP.Modules.Inventory.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Inventory\Inventory.Application\KaguERP.Modules.Inventory.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Inventory\Inventory.Infrastructure\KaguERP.Modules.Inventory.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Sales\Sales.Domain\KaguERP.Modules.Sales.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Sales\Sales.Application\KaguERP.Modules.Sales.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Sales\Sales.Infrastructure\KaguERP.Modules.Sales.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Modules\Parties\Parties.Domain\KaguERP.Modules.Parties.Domain.csproj"
                       ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\Modules\Parties\Parties.Application\KaguERP.Modules.Parties.Application.csproj"
