@@ -46,10 +46,17 @@ public sealed class SalesOrderLifecycleView
 {
     public SalesOrderLifecycleView(
         SalesOrderLifecycleState state,
+        IEnumerable<SalesOrderLineCommitment> lines,
         IEnumerable<SalesOrderTransitionEvent> transitions)
     {
         ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(lines);
         ArgumentNullException.ThrowIfNull(transitions);
+        SalesOrderCommitment commitment = SalesOrderCommitment.Create(
+            state.TenantId,
+            state.CompanyId,
+            state.OrderId,
+            lines);
         SalesOrderTransitionEvent[] materialized = transitions.ToArray();
         long expectedVersion = 2;
         SalesOrderStatus expectedPreviousStatus = SalesOrderStatus.Draft;
@@ -76,10 +83,12 @@ public sealed class SalesOrderLifecycleView
         }
 
         State = state;
+        Commitment = commitment;
         Transitions = Array.AsReadOnly(materialized);
     }
 
     public SalesOrderLifecycleState State { get; }
+    public SalesOrderCommitment Commitment { get; }
     public IReadOnlyList<SalesOrderTransitionEvent> Transitions { get; }
 }
 

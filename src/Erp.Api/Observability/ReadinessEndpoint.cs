@@ -6,8 +6,10 @@ internal static class ReadinessEndpoint
 {
     public static IEndpointRouteBuilder MapKaguErpHealthEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapGet("/health/live", () => Results.Ok(new { status = "ok" }));
-        endpoints.MapGet("/health/ready", CheckReadinessAsync);
+        endpoints.MapGet("/health/live", () => Results.Ok(new { status = "ok" }))
+            .WithName("GetLiveness");
+        endpoints.MapGet("/health/ready", CheckReadinessAsync)
+            .WithName("GetReadiness");
         return endpoints;
     }
 

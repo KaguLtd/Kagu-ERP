@@ -26,6 +26,11 @@ Teklif, satış siparişi, stok rezervasyonu, sevk/irsaliye, fatura, iade ve ilg
 
 - `SALES-ORD-001`: Sipariş lifecycle geçişi exact expected version, actor, UTC occurrence ve correlation olmadan uygulanamaz; her geçiş previous/new state ve version taşıyan append-only olay üretir.
 - `SALES-ORD-002`: Sipariş commitment'tır; confirm tek başına stok hareketi, gelir, cari açık kalem veya GL kaydı üretmez.
+- `SALES-ORD-002A`: İlk taslak 1–500 authoritative satırla atomik oluşturulur. Her satır immutable
+  `order_line_id`, şirket için aktif item, canonical base UOM ve pozitif `numeric(20,6)` miktar taşır;
+  API miktarı binary floating point'e çevirmeyen invariant decimal string olarak alır/verir. Aynı create
+  idempotency kimliği farklı satırlarla tekrar kullanılamaz. Satır revizyonu ileride eski commitment'ı
+  yerinde değiştirmeyen ayrı version/event sözleşmesiyle açılacaktır.
 - `SALES-ORD-003`: Sipariş current projection'ı tenant/company forced RLS altında exact `+1`
   optimistic version ile güncellenir; her update aynı transaction'daki immutable transition
   event ile birebir doğrulanır. Correlation tekrarında immutable komut içeriği aynıysa ilk sonuç
@@ -33,6 +38,19 @@ Teklif, satış siparişi, stok rezervasyonu, sevk/irsaliye, fatura, iade ve ilg
 - `SALES-ORD-004`: Sipariş detay okuması `sales.order.view` permission ve company scope ister;
   current state ile version sıralı transition timeline aynı caller transaction'ında okunur ve
   eksik, sıra dışı veya current state ile uyuşmayan geçmiş fail-closed reddedilir.
+- `SALES-API-001`: Sipariş create ve transition HTTP komutları UUID `Idempotency-Key`, transition
+  ayrıca quoted positive `If-Match` ister. Create anahtarı aggregate kimliği, transition anahtarı
+  correlation kimliğidir; aynı immutable istek ilk sonucu döndürür. Başka scope kaynakları 404,
+  stale version 412, iş/idempotency çatışması 409 ve domain validation 422 Problem Details üretir.
+  Sözleşme build sırasında OpenAPI 3.1 olarak `docs/openapi/KaguERP.Api.json` dosyasına üretilir;
+  operation kimlikleri, zorunlu header'lar ve cevap matrisi architecture drift kapısındadır.
+  Aynı sözleşmeden sabitlenmiş OpenAPI Generator ile TypeScript ve Kotlin istemcileri üretilir;
+  web same-origin BFF adaptörünü, Android ise explicit HTTPS base URL ve enjekte token provider'ını
+  kullanır. Generated DTO'lar Sales domain veya UI modeli sayılmaz.
+- `SALES-RES-001`: Inventory rezervasyon orchestration'ı Sales tablolarını doğrudan okuyamaz.
+  Sales-owned published contract yalnız `sales.order.confirm` permission/company scope altında,
+  `confirmed` durumdaki exact order version için order-line/item/base-UOM/decimal miktar snapshot'ı
+  yayımlar; approved fakat unconfirmed veya stale version görünmez sonuç verir.
 
 Durum:
 
@@ -44,6 +62,8 @@ Durum:
 - Currency, price list, payment term, tax determination context.
 - Kredi risk ve iskonto policy submit/confirm anında.
 - Confirm ile reservation policy çalışır.
+- Mevcut teknik dilimde confirm yalnız authoritative satır varlığını doğrular; atomik reservation
+  orchestration bir sonraki MP-04 dilimidir ve tamamlanana kadar stok ayırmaz.
 - Backorder/kısmi sevk ve kapanan line reason.
 
 ## 5. Fiyat ve iskonto
@@ -134,8 +154,15 @@ POST /api/v1/sales-quotes
 POST /api/v1/sales-quotes/{id}/send
 POST /api/v1/sales-quotes/{id}/convert-to-order
 POST /api/v1/sales-orders
+GET  /api/v1/sales-orders/{id}?companyId={companyId}
 POST /api/v1/sales-orders/{id}/submit
+POST /api/v1/sales-orders/{id}/approve
+POST /api/v1/sales-orders/{id}/reject
+POST /api/v1/sales-orders/{id}/withdraw
+POST /api/v1/sales-orders/{id}/revise
 POST /api/v1/sales-orders/{id}/confirm
+POST /api/v1/sales-orders/{id}/cancel
+POST /api/v1/sales-orders/{id}/close
 POST /api/v1/dispatches
 POST /api/v1/dispatches/{id}/post
 POST /api/v1/sales-invoices

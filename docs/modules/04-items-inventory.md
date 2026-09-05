@@ -53,12 +53,31 @@ Her movement source belge/satır, warehouse/bin, quantity/UOM/base quantity, lot
 
 Durum: `active → partially_consumed → consumed | released | expired`.
 
+- `INV-RES-001`: Reservation exact tenant/company/item/warehouse/base-UOM ile versioned demand
+  source type/id/line/version taşır. Consume yalnız aktif kalan miktar kadar ve exact decimal yapılır;
+  release gerekçeli, expiry ise yalnız açık UTC expiry anı geldiğinde mümkündür. Her geçiş previous/new
+  state+version, actor, correlation ve occurrence taşıyan append-only event üretir.
+- `INV-RES-002`: Reservation create adayı `inventory.reservation.create`, exact company scope ve
+  transaction içinde authoritative olarak yüklenmiş actor-bound warehouse evidence ister; yalnız UI
+  görünürlüğü veya request içindeki ham warehouse listesi yetki kanıtı değildir. Candidate ayrıca
+  üretici modülün published contract'ından yüklenen exact source version/item/base-UOM/azami miktar
+  demand evidence'ıyla birebir eşleşir; caller beyanı talep kanıtı sayılamaz.
+- `INV-RES-003`: Sales order demand, Inventory'nin Sales tablolarını doğrudan okumasıyla değil,
+  `Sales.Contracts` altında yayımlanan immutable confirmed-order snapshot'ının Inventory-owned
+  adaptöre çevrilmesiyle alınır. Adaptör dönen tenant/company/order/version bağlamını yeniden
+  doğrular; eksik veya uyuşmayan producer sonucu fail-closed reddeder. Exact order line seçimi,
+  reservation state kurulumu ve permission/company/warehouse evidence doğrulaması tek candidate
+  builder sınırından geçer; bu builder persistence veya available sonucu üretmez.
 - Sales order/demand source ve line unique.
 - Available kontrolü ve reservation create atomik.
 - Kısmi sevk rezervasyonu azaltır.
 - Sipariş iptal/reject/expiry release event'i üretir.
 - Over-reservation policy varsayılan kapalı.
 - Depo/lot seçimi sevk anında veya policy gereği rezervasyonda.
+
+Mevcut teknik dilim lifecycle, yetki ve producer-demand adaptör sözleşmesidir; persisted available
+veya stok ayrıldığı iddiasında bulunmaz. Depo seçim zamanı ve position-lock politikası karara bağlanıp
+Inventory-owned persistence tamamlanmadan Sales confirm rezervasyon oluşturamaz.
 
 ## 7. Transfer
 

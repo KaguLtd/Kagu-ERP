@@ -83,6 +83,29 @@
           "Npgsql": "[10.0.3, )"
         }
       },
+      "kaguerp.modules.sales.application": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Sales.Domain": "[1.0.0, )"
+        }
+      },
+      "kaguerp.modules.sales.contracts": {
+        "type": "Project"
+      },
+      "kaguerp.modules.sales.domain": {
+        "type": "Project"
+      },
+      "kaguerp.modules.sales.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Sales.Application": "[1.0.0, )",
+          "KaguERP.Modules.Sales.Contracts": "[1.0.0, )",
+          "KaguERP.Modules.Sales.Domain": "[1.0.0, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
       "kaguerp.modules.treasury.application": {
         "type": "Project",
         "dependencies": {

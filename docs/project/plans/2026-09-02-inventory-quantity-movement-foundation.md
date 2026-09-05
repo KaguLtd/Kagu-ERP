@@ -6,7 +6,7 @@
 - **Durum:** in-progress.
 - **Sahip:** Ürün/muhasebe sahipleri `atanmadı`; teknik uygulama Codex.
 - **Başlangıç:** 2 Eylül 2026.
-- **İlgili requirement ID'leri:** `INV-INV-001`, `INV-MOV-001`, `INV-TRF-001`, `INV-BKD-001`, `INV-MST-001`, `INV-AUTH-001`, `DATA-002`.
+- **İlgili requirement ID'leri:** `INV-INV-001`, `INV-MOV-001`, `INV-TRF-001`, `INV-BKD-001`, `INV-MST-001`, `INV-AUTH-001`, `INV-RES-001`, `INV-RES-002`, `INV-RES-003`, `DATA-002`.
 - **Etkilenen modüller:** Inventory Domain, Inventory Infrastructure, migrator ve kalite harness'leri.
 - **Okunan zorunlu belgeler:** `MASTER_PLAN.md`, `docs/README.md`, teknik temel, repository yapısı, veri mimarisi, ortak iş akışları, organizasyon, stok ve satış modül sözleşmeleri.
 - **Definition of Ready sonucu:** Koşullu hazır. `DEC-MP01-011` değerleme, eksi stok, backdate/repost ve sayım politikalarını açık bırakır; karar kaydı generic quantity invariant ve impact-preview contract çalışmalarına açıkça izin verir.
@@ -65,6 +65,8 @@
 | 10 | Bitemporal on-hand quantity query | Permission, warehouse scope, effective as-of, recorded cutoff ve exact transfer toplamları | validating |
 | 11 | Scoped movement timeline | Kaynak lineage, effective/recorded kesiti, depo scope'u ve kararlı cursor pagination | validating |
 | 12 | Immediate transfer reversal | Çift reversal linki, tek ters kayıt, exact karşı miktar ve sıfıra dönen depo bakiyesi | validating |
+| 13 | Reservation lifecycle foundation | Versioned demand line, warehouse/UOM, partial consume, release ve expiry | validating |
+| 14 | Sales reservation demand adapter | Published contract üzerinden exact scope/version ve kayıpsız line mapping | validating |
 
 ## Test planı
 
@@ -94,6 +96,9 @@
 - 4 Eylül 2026: `inventory.quantity.view` ile company ve authoritative warehouse kapsamını zorunlu tutan bitemporal on-hand sorgusu eklendi. Loader append-only hareketleri `effective_date <= as-of` ve `recorded_at <= UTC cutoff` kesitinde item/warehouse/base-UOM bazında exact toplar; sıfır bakiyeyi satır olarak üretmez. Yetki atamaları transfer write ve miktar read transaction'ında `FOR SHARE` ile yeniden yüklenip kilitlenir; stale/revoked evidence kullanılamaz. Cutoff öncesi görünmezlik ve transfer sonrası `-10/+10` yeniden üretimi gerçek PostgreSQL senaryosuna eklendi. Infrastructure, Unit ve Integration Release build'leri `0 warning/error`; runtime MP-04 toplu kapısına ertelendi.
 - 4 Eylül 2026: `inventory.movement.view` permission'lı hareket zaman çizelgesi eklendi. Query exact item, effective-date aralığı, UTC recorded cutoff, 1–200 sayfa boyutu ve deterministik `(effective_date, recorded_at, warehouse, sequence, movement)` cursor'u taşır. Loader yalnız authoritative atanmış depoları okur, source event/line/version/purpose ile transfer karşı-depo bağını korur ve her sayfada yetkiyi yeniden kilitli kanıtlar. İki hareketli transferin iki tek-satırlık sayfada yinelenmeden, source lineage ve sıfır toplam korunarak okunması PostgreSQL senaryosuna eklendi. Infrastructure, Unit ve Integration Release build'leri `0 warning/error`; runtime MP-04 toplu kapısına ertelendi.
 - 4 Eylül 2026: Immediate transfer düzeltmesi append-only reversal bağına taşındı. Her iki karşı hareket distinct `reversal_of_movement_id` taşımadan reversal çifti kurulamaz; DB aynı original movement'in ikinci kez terslenmesini unique index ile, item/warehouse/UOM/exact karşı miktar ve recorded-time sırasını deferred guard ile korur. Yanlış `9/-9` karşılık commit sonunda reddedilecek, doğru `10/-10` çiftinden sonra her iki depo on-hand bakiyesi sıfıra dönecek PostgreSQL senaryoları eklendi. Domain, Infrastructure, Unit ve Integration Release build'leri `0 warning/error`; runtime/migration kanıtı MP-04 toplu kapısına ertelendi.
+- 5 Eylül 2026: `INV-RES-001` reservation lifecycle temeli eklendi. Inventory-owned state versioned demand type/id/line/version, exact warehouse/item/base-UOM ve `numeric(20,6)` miktarı korur; partial/full consume, gerekçeli release ve explicit UTC expiry append-only event sözleşmesiyle ilerler. Available/persistence veya Sales confirm bağlantısı henüz uygulanmadığından stok ayrıldığı iddia edilmez. Inventory Domain ve Unit Release derlemeleri `0 warning/error`; runtime MP-04 toplu kapısına bırakıldı. Ayrıntı [reservation lifecycle planındadır](2026-09-05-inventory-reservation-lifecycle-foundation.md).
+- 5 Eylül 2026: `INV-RES-002` ile reservation create adayı `inventory.reservation.create`, exact company scope ve actor-bound authoritative warehouse evidence'a bağlandı. Ham request warehouse listesi yetki sayılmaz; farklı actor veya atanmamış depo reddedilir. Inventory Application ve Unit Release derlemeleri `0 warning/error`; runtime MP-04 toplu kapısına bırakıldı.
+- 5 Eylül 2026: `INV-RES-003` ile Sales-owned confirmed order snapshot'ı Inventory-owned reservation demand evidence'a yayımlanmış contract üzerinden çevrildi. Adaptör dönen tenant/company/order/version bilgisini exact doğrular, line item/base-UOM/decimal quantity değerlerini Inventory tiplerine kayıpsız taşır ve Sales tablosunu doğrudan okumaz. Exact line seçimi ile permission/company/warehouse/demand doğrulamasını birleştiren candidate builder eksik satırı fail-closed reddeder; persistence veya available sonucu üretmez. Inventory Infrastructure, Integration ve Architecture Release derlemeleri `0 warning/error`; runtime MP-04 toplu kapısına bırakıldı.
 
 ## Tamamlanma kanıtı
 

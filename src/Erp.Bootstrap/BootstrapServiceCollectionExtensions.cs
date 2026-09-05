@@ -3,6 +3,8 @@ using KaguERP.BuildingBlocks.Application.Observability;
 using KaguERP.BuildingBlocks.Application.Security;
 using KaguERP.Modules.Reporting.Application.PartyReports;
 using KaguERP.Modules.Reporting.Infrastructure.Persistence;
+using KaguERP.Modules.Sales.Application.Orders;
+using KaguERP.Modules.Sales.Infrastructure.Persistence;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -26,6 +28,7 @@ public static class BootstrapServiceCollectionExtensions
             services.TryAddScoped<IAuthorizationAuditWriter, UnavailableAuthorizationAuditWriter>();
             services.TryAddScoped<IReadinessProbe, UnavailableReadinessProbe>();
             services.TryAddScoped<IPartyAccountDetailReportQuery, UnavailablePartyAccountDetailReportQuery>();
+            services.TryAddScoped<ISalesOrderLifecycleGateway, UnavailableSalesOrderLifecycleGateway>();
         }
         else
         {
@@ -36,6 +39,9 @@ public static class BootstrapServiceCollectionExtensions
             services.TryAddScoped<IAuthorizationAuditWriter, PostgresAuthorizationAuditWriter>();
             services.TryAddScoped<IReadinessProbe, PostgresReadinessProbe>();
             services.TryAddScoped<IPartyAccountDetailReportQuery, PostgresPartyAccountDetailReportQuery>();
+            services.TryAddSingleton<AppendSalesOrderAudit>(
+                _ => PostgresAuthorizationAuditWriter.AppendAsync);
+            services.TryAddScoped<ISalesOrderLifecycleGateway, PostgresSalesOrderLifecycleGateway>();
         }
 
         return services;

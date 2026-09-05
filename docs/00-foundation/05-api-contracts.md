@@ -194,7 +194,15 @@ Tenant bazlı adil kullanım ve endpoint maliyeti dikkate alınır. Limit güven
 ## 16. OpenAPI ve istemci üretimi
 
 - CI OpenAPI'yı deterministik üretir ve diff kontrol eder.
-- TS/Kotlin istemci yalnız onaylı spec'ten generated.
+- .NET API build'i onaylı OpenAPI 3.1 kaynağını `docs/openapi/KaguERP.Api.json` dosyasına üretir;
+  runtime doküman rotası yalnız Development ortamında açılır.
+- TS/Kotlin istemci yalnız onaylı spec'ten `pnpm run generate:clients` ile üretilir. Üretim aracı
+  OpenAPI Generator `7.24.0`, npm launcher `2.40.1` sürümüne sabitlenmiştir; script önce aracın
+  erişilebilirliğini doğrular, ardından yalnız iki tanımlı generated dizini temizler.
+- TypeScript çıktı `packages/api-client-ts`, Kotlin çıktı `apps/android/generated/api-client`
+  altındadır. Web adaptörü same-origin cookie/BFF için boş base path ve `same-origin` credentials
+  kullanır; Android adaptörü açıkça verilen HTTPS base URL ve güvenli katmandan enjekte edilen token
+  provider ister. Jeneratörün `http://localhost` varsayılanı ürün kodunda otorite değildir.
 - Generated modeller domain/UI model değildir; mapping katmanı vardır.
 - Auth, retry, correlation, locale, decimal ve error mapping ortak client katmanında.
 - Contract testleri real API ile generated client'ı çalıştırır.

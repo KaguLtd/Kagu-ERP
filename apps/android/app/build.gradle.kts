@@ -35,6 +35,10 @@ android {
         buildConfig = false
     }
 
+    sourceSets.getByName("main").kotlin.directories.add(
+        layout.projectDirectory.dir("../generated/api-client/src/main/kotlin").asFile.absolutePath,
+    )
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -44,6 +48,7 @@ android {
         compilerOptions {
             jvmTarget = JvmTarget.JVM_17
             allWarningsAsErrors = true
+            freeCompilerArgs.add("-Xannotation-default-target=param-property")
         }
     }
 
@@ -69,6 +74,7 @@ android {
 }
 
 dependencies {
+    implementation(kotlin("reflect"))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
@@ -79,6 +85,9 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.moshi.adapters)
+    implementation(libs.moshi.kotlin)
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
 

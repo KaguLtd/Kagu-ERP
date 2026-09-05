@@ -10,7 +10,8 @@ internal static class ExecutionScopeEndpoint
 
     public static IEndpointRouteBuilder MapExecutionScopeEndpoint(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapGet("/api/v1/me/scopes", HandleAsync);
+        endpoints.MapGet("/api/v1/me/scopes", HandleAsync)
+            .WithName("GetExecutionScopes");
         return endpoints;
     }
 

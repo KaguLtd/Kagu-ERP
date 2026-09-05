@@ -3,9 +3,11 @@ using System.Text.Json;
 using KaguERP.Api.Observability;
 using KaguERP.Api.Reports;
 using KaguERP.Api.Security;
+using KaguERP.Api.Sales;
 using KaguERP.BuildingBlocks.Application.Observability;
 using KaguERP.BuildingBlocks.Application.Security;
 using KaguERP.Modules.Reporting.Application.PartyReports;
+using KaguERP.Modules.Sales.Domain.Orders;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Patterns;
@@ -13,6 +15,9 @@ using Microsoft.Extensions.Logging;
 
 internal static class ApiContractCheck
 {
+    private static readonly string[] ExpectedSalesOrderActions =
+        ["submit", "approve", "reject", "withdraw", "revise", "confirm", "cancel", "close"];
+
     public static async Task RunAsync()
     {
         await AssertCorrelationIsGeneratedAsync();
@@ -26,6 +31,7 @@ internal static class ApiContractCheck
         await AssertTrustedApplicationScopeContinuesAsync();
         AssertCrossScopeResourceIsRejected();
         AssertPartyReportQueryContract();
+        AssertSalesOrderLifecycleContract();
 
         Console.WriteLine("API application-scope, correlation and safe telemetry contract checks passed.");
     }
@@ -224,6 +230,61 @@ internal static class ApiContractCheck
         Assert(PartyReportQueryEndpoint.FormatAmount(1234.5m) == "1234.5000" &&
                PartyReportQueryEndpoint.FormatAmount(-0.125m) == "-0.1250",
             "Party report monetary JSON contract is not an invariant four-decimal string.");
+    }
+
+    private static void AssertSalesOrderLifecycleContract()
+    {
+        Assert(SalesOrderLifecycleEndpoint.CollectionRoute == "/api/v1/sales-orders" &&
+               SalesOrderLifecycleEndpoint.DetailRoute == "/api/v1/sales-orders/{orderId:guid}" &&
+               SalesOrderLifecycleEndpoint.TransitionRoute == "/api/v1/sales-orders/{orderId:guid}/{action}",
+            "Sales order lifecycle API routes changed unexpectedly.");
+
+        Guid idempotencyKey = Guid.CreateVersion7();
+        var context = new DefaultHttpContext();
+        context.Request.Headers[SalesOrderLifecycleEndpoint.IdempotencyHeader] = idempotencyKey.ToString("D");
+        context.Request.Headers[SalesOrderLifecycleEndpoint.VersionHeader] = "\"7\"";
+        Assert(SalesOrderLifecycleEndpoint.TryReadIdempotencyKey(context.Request.Headers, out Guid parsedKey) &&
+               parsedKey == idempotencyKey,
+            "Sales order API rejected a canonical UUID idempotency key.");
+        Assert(SalesOrderLifecycleEndpoint.TryReadExpectedVersion(context.Request.Headers, out long version) &&
+               version == 7,
+            "Sales order API rejected a quoted positive If-Match version.");
+        Assert(SalesOrderLifecycleEndpoint.TryResolveTransition("confirm", out SalesOrderTransition transition) &&
+               transition == SalesOrderTransition.Confirm &&
+               !SalesOrderLifecycleEndpoint.TryResolveTransition("post", out _) &&
+               SalesOrderLifecycleEndpoint.AllowedActions.SequenceEqual(ExpectedSalesOrderActions),
+            "Sales order API action allowlist changed unexpectedly.");
+
+        Guid tenantId = Guid.CreateVersion7();
+        Guid companyId = Guid.CreateVersion7();
+        Guid orderId = Guid.CreateVersion7();
+        Guid makerId = Guid.CreateVersion7();
+        SalesOrderLifecycleState state = SalesOrderLifecycleState.CreateDraft(
+            tenantId, companyId, orderId, makerId);
+        Guid orderLineId = Guid.CreateVersion7();
+        Guid itemId = Guid.CreateVersion7();
+        SalesOrderCommitment commitment = SalesOrderCommitment.Create(
+            tenantId,
+            companyId,
+            orderId,
+            [SalesOrderLineCommitment.Create(
+                orderLineId,
+                itemId,
+                " ea ",
+                SalesOrderQuantity.Create(10.125m))]);
+        SalesOrderLifecycleApiResponse response = SalesOrderLifecycleEndpoint.CreateResponse(state, commitment);
+        Assert(response.Id == orderId && response.CompanyId == companyId && response.Status == "draft" &&
+               response.Version == 1 && response.Transitions is null && response.Lines.Count == 1 &&
+               response.Lines[0].Id == orderLineId && response.Lines[0].ItemId == itemId &&
+               response.Lines[0].BaseUomCode == "EA" &&
+               response.Lines[0].OrderedBaseQuantity == "10.125",
+            "Sales order API response lost aggregate identity or version semantics.");
+
+        context.Request.Headers[SalesOrderLifecycleEndpoint.IdempotencyHeader] = "not-a-guid";
+        context.Request.Headers[SalesOrderLifecycleEndpoint.VersionHeader] = "7";
+        Assert(!SalesOrderLifecycleEndpoint.TryReadIdempotencyKey(context.Request.Headers, out _) &&
+               !SalesOrderLifecycleEndpoint.TryReadExpectedVersion(context.Request.Headers, out _),
+            "Sales order API accepted malformed idempotency or If-Match headers.");
     }
 
     private static DefaultHttpContext CreateContext(bool authenticated)

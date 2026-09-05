@@ -1,0 +1,52 @@
+{
+  "$schema": "./node_modules/@openapitools/openapi-generator-cli/config.schema.json",
+  "spaces": 2,
+  "generator-cli": {
+    "version": "7.24.0",
+    "generators": {
+      "typescript": {
+        "generatorName": "typescript-fetch",
+        "inputSpec": "docs/openapi/KaguERP.Api.json",
+        "output": "packages/api-client-ts",
+        "globalProperty": {
+          "apiDocs": "false",
+          "apiTests": "false",
+          "modelDocs": "false",
+          "modelTests": "false"
+        },
+        "additionalProperties": {
+          "disallowAdditionalPropertiesIfNotPresent": "false",
+          "npmName": "@kaguerp/api-client",
+          "npmVersion": "0.1.0",
+          "nullSafeAdditionalProps": "true",
+          "stringEnums": "true",
+          "supportsES6": "true",
+          "useSingleRequestParameter": "true"
+        }
+      },
+      "kotlin": {
+        "generatorName": "kotlin",
+        "inputSpec": "docs/openapi/KaguERP.Api.json",
+        "output": "apps/android/generated/api-client",
+        "globalProperty": {
+          "apiDocs": "false",
+          "apiTests": "false",
+          "modelDocs": "false",
+          "modelTests": "false"
+        },
+        "additionalProperties": {
+          "artifactId": "kagu-erp-api-client",
+          "artifactVersion": "0.1.0",
+          "dateLibrary": "java8",
+          "groupId": "com.kagultd.erp",
+          "library": "jvm-okhttp4",
+          "omitGradlePluginVersions": "true",
+          "omitGradleWrapper": "true",
+          "packageName": "com.kagultd.erp.generated.api",
+          "serializationLibrary": "moshi",
+          "sourceFolder": "src/main/kotlin"
+        }
+      }
+    }
+  }
+}

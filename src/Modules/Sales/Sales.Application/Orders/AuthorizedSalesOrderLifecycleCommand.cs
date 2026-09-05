@@ -7,23 +7,31 @@ public sealed class AuthorizedSalesOrderCreateCommand
 {
     public const string RequiredPermission = "sales.order.create";
 
-    private AuthorizedSalesOrderCreateCommand(ExecutionScope scope, Guid companyId, Guid orderId)
+    private AuthorizedSalesOrderCreateCommand(
+        ExecutionScope scope,
+        Guid companyId,
+        Guid orderId,
+        SalesOrderCommitment commitment)
     {
         Scope = scope;
         CompanyId = companyId;
         OrderId = orderId;
+        Commitment = commitment;
     }
 
     public ExecutionScope Scope { get; }
     public Guid CompanyId { get; }
     public Guid OrderId { get; }
+    public SalesOrderCommitment Commitment { get; }
 
     public static AuthorizedSalesOrderCreateCommand Create(
         ExecutionScope scope,
         Guid companyId,
-        Guid orderId)
+        Guid orderId,
+        SalesOrderCommitment commitment)
     {
         ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(commitment);
         scope.EnsureAllowed(scope.TenantId, companyId);
         if (!scope.HasPermission(companyId, RequiredPermission))
         {
@@ -38,7 +46,9 @@ public sealed class AuthorizedSalesOrderCreateCommand
                 "Sales order identity is required.");
         }
 
-        return new AuthorizedSalesOrderCreateCommand(scope, companyId, orderId);
+        commitment.EnsureMatches(scope.TenantId, companyId, orderId);
+
+        return new AuthorizedSalesOrderCreateCommand(scope, companyId, orderId, commitment);
     }
 }
 

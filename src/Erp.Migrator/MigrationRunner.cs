@@ -53,6 +53,7 @@ internal sealed class MigrationRunner(string connectionString)
         new("0042_payment_currency_conversion_snapshot", "0042_payment_currency_conversion_snapshot.sql"),
         new("0043_inventory_quantity_movement_foundation", "0043_inventory_quantity_movement_foundation.sql"),
         new("0044_sales_order_lifecycle_foundation", "0044_sales_order_lifecycle_foundation.sql"),
+        new("0045_sales_order_line_commitment", "0045_sales_order_line_commitment.sql"),
     ];
 
     public async Task<int> RunAsync(CancellationToken cancellationToken)

@@ -7,6 +7,7 @@ namespace KaguERP.Modules.Sales.Infrastructure.Persistence;
 
 public sealed record SalesOrderLifecyclePersistenceResult(
     SalesOrderLifecycleState State,
+    SalesOrderCommitment Commitment,
     SalesOrderTransitionEvent? Event,
     bool Created);
 
@@ -43,7 +44,8 @@ public static class PostgresSalesOrderLifecycleWriter
         insert.Parameters.AddWithValue((short)draft.Status);
         if (await insert.ExecuteScalarAsync(cancellationToken) is Guid)
         {
-            return new SalesOrderLifecyclePersistenceResult(draft, null, true);
+            await InsertLinesAsync(connection, transaction, command.Commitment, command.Scope.ActorId, cancellationToken);
+            return new SalesOrderLifecyclePersistenceResult(draft, command.Commitment, null, true);
         }
 
         SalesOrderLifecycleState? existing = await LoadStateAsync(
@@ -55,7 +57,16 @@ public static class PostgresSalesOrderLifecycleWriter
                 "The sales order identity already has different lifecycle state.");
         }
 
-        return new SalesOrderLifecyclePersistenceResult(existing, null, false);
+        SalesOrderCommitment existingCommitment = await LoadCommitmentAsync(
+            connection, transaction, existing, cancellationToken);
+        if (!command.Commitment.HasSameLines(existingCommitment.Lines))
+        {
+            throw new SalesOrderPersistenceConflictException(
+                "SALES_ORDER_CREATE_CONFLICT",
+                "The sales order identity already has different immutable lines.");
+        }
+
+        return new SalesOrderLifecyclePersistenceResult(existing, existingCommitment, null, false);
     }
 
     public static async ValueTask<SalesOrderLifecyclePersistenceResult> TransitionAsync(
@@ -73,7 +84,9 @@ public static class PostgresSalesOrderLifecycleWriter
         if (replay is not null)
         {
             EnsureExactReplay(command, replay);
-            return new SalesOrderLifecyclePersistenceResult(replay.State, replay.Event, false);
+            SalesOrderCommitment commitment = await LoadCommitmentAsync(
+                connection, transaction, replay.State, cancellationToken);
+            return new SalesOrderLifecyclePersistenceResult(replay.State, commitment, replay.Event, false);
         }
 
         SalesOrderLifecycleState current = await LoadStateAsync(
@@ -88,7 +101,9 @@ public static class PostgresSalesOrderLifecycleWriter
         if (replay is not null)
         {
             EnsureExactReplay(command, replay);
-            return new SalesOrderLifecyclePersistenceResult(replay.State, replay.Event, false);
+            SalesOrderCommitment commitment = await LoadCommitmentAsync(
+                connection, transaction, replay.State, cancellationToken);
+            return new SalesOrderLifecyclePersistenceResult(replay.State, commitment, replay.Event, false);
         }
 
         SalesOrderTransitionResult result = SalesOrderLifecycle.Apply(
@@ -123,7 +138,67 @@ public static class PostgresSalesOrderLifecycleWriter
         }
         await InsertTransitionAsync(connection, transaction, current, result, cancellationToken);
 
-        return new SalesOrderLifecyclePersistenceResult(result.State, result.Event, true);
+        SalesOrderCommitment persistedCommitment = await LoadCommitmentAsync(
+            connection, transaction, result.State, cancellationToken);
+        return new SalesOrderLifecyclePersistenceResult(result.State, persistedCommitment, result.Event, true);
+    }
+
+    private static async ValueTask InsertLinesAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        SalesOrderCommitment commitment,
+        Guid actorId,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            INSERT INTO sales.sales_order_line
+                (tenant_id,company_id,order_id,order_line_id,item_id,base_uom_code,
+                 ordered_base_quantity,created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+            """;
+        foreach (SalesOrderLineCommitment line in commitment.Lines.OrderBy(item => item.OrderLineId))
+        {
+            await using var insert = new NpgsqlCommand(sql, connection, transaction);
+            insert.Parameters.AddWithValue(commitment.TenantId);
+            insert.Parameters.AddWithValue(commitment.CompanyId);
+            insert.Parameters.AddWithValue(commitment.OrderId);
+            insert.Parameters.AddWithValue(line.OrderLineId);
+            insert.Parameters.AddWithValue(line.ItemId);
+            insert.Parameters.AddWithValue(line.BaseUomCode);
+            insert.Parameters.AddWithValue(line.OrderedQuantity.Value);
+            insert.Parameters.AddWithValue(actorId);
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static async ValueTask<SalesOrderCommitment> LoadCommitmentAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        SalesOrderLifecycleState state,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT order_line_id,item_id,base_uom_code,ordered_base_quantity
+            FROM sales.sales_order_line
+            WHERE tenant_id=$1 AND company_id=$2 AND order_id=$3
+            ORDER BY order_line_id
+            """;
+        await using var query = new NpgsqlCommand(sql, connection, transaction);
+        query.Parameters.AddWithValue(state.TenantId);
+        query.Parameters.AddWithValue(state.CompanyId);
+        query.Parameters.AddWithValue(state.OrderId);
+        var lines = new List<SalesOrderLineCommitment>();
+        await using NpgsqlDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            lines.Add(SalesOrderLineCommitment.Create(
+                reader.GetGuid(0),
+                reader.GetGuid(1),
+                reader.GetString(2),
+                SalesOrderQuantity.Create(reader.GetDecimal(3))));
+        }
+
+        return SalesOrderCommitment.Create(state.TenantId, state.CompanyId, state.OrderId, lines);
     }
 
     private static async ValueTask InsertTransitionAsync(
@@ -262,7 +337,6 @@ public static class PostgresSalesOrderLifecycleWriter
         if (replay.Event.PreviousVersion != command.ExpectedVersion ||
             replay.Event.Transition != command.Transition ||
             replay.Event.ActorId != command.Scope.ActorId ||
-            replay.Event.OccurredAt != command.OccurredAt ||
             !string.Equals(replay.Event.Reason, normalizedReason, StringComparison.Ordinal))
         {
             throw new SalesOrderPersistenceConflictException(

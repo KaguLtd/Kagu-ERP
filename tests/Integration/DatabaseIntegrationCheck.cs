@@ -198,10 +198,10 @@ internal static partial class DatabaseIntegrationCheck
                 migratorDataSource, appDataSource, tenantA, companyA1, companyA2, actorId);
             await AssertProjectionGenerationPersistenceAsync(
                 migratorDataSource, appDataSource, tenantA, companyA1, companyA2, actorId);
-            await AssertInventoryQuantityMovementFoundationAsync(
+            Guid inventoryItemId = await AssertInventoryQuantityMovementFoundationAsync(
                 migratorDataSource, appDataSource, tenantA, companyA1, companyA2, actorId);
             await AssertSalesOrderLifecycleFoundationAsync(
-                appDataSource, tenantA, companyA1, companyA2, actorId);
+                appDataSource, tenantA, companyA1, companyA2, actorId, inventoryItemId);
             await AssertJournalReservationAuditOutboxAtomicityAsync(
                 migratorDataSource,
                 appDataSource,

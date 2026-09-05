@@ -108,9 +108,19 @@ internal static class SalesDomainChecks
         Guid actorId = Guid.NewGuid();
         Guid orderId = Guid.NewGuid();
         var denied = new ExecutionScope(tenantId, actorId, [companyId]);
+        SalesOrderLineCommitment line = SalesOrderLineCommitment.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "EA",
+            SalesOrderQuantity.Create(10m));
+        SalesOrderCommitment commitment = SalesOrderCommitment.Create(
+            tenantId,
+            companyId,
+            orderId,
+            [line]);
         ExpectAuthorization(
             "SALES_ORDER_CREATE_PERMISSION_REQUIRED",
-            () => AuthorizedSalesOrderCreateCommand.Create(denied, companyId, orderId));
+            () => AuthorizedSalesOrderCreateCommand.Create(denied, companyId, orderId, commitment));
 
         var allowed = new ExecutionScope(
             tenantId,
@@ -118,7 +128,9 @@ internal static class SalesDomainChecks
             [new CompanyAccess(
                 companyId,
                 ["sales.order.create", "sales.order.submit", "sales.order.view", "sales.fulfilment.record"])]);
-        _ = AuthorizedSalesOrderCreateCommand.Create(allowed, companyId, orderId);
+        AuthorizedSalesOrderCreateCommand create = AuthorizedSalesOrderCreateCommand.Create(
+            allowed, companyId, orderId, commitment);
+        Equal(commitment, create.Commitment, "Sales order command lost its line commitment.");
         _ = AuthorizedSalesOrderLifecycleQuery.Create(allowed, companyId, orderId);
         _ = AuthorizedSalesOrderTransitionCommand.Create(
             allowed,
@@ -161,11 +173,15 @@ internal static class SalesDomainChecks
             actorId,
             Guid.NewGuid(),
             new DateTimeOffset(2026, 9, 4, 12, 0, 0, TimeSpan.Zero));
-        var view = new SalesOrderLifecycleView(submitted.State, [submitted.Event]);
+        var view = new SalesOrderLifecycleView(submitted.State, [line], [submitted.Event]);
         Equal(1, view.Transitions.Count, "Sales order lifecycle view lost its transition history.");
+        Equal(1, view.Commitment.Lines.Count, "Sales order lifecycle view lost its line commitment.");
         ExpectView(
             "SALES_ORDER_TIMELINE_STATE_MISMATCH",
-            () => _ = new SalesOrderLifecycleView(submitted.State, []));
+            () => _ = new SalesOrderLifecycleView(submitted.State, [line], []));
+        Expect(
+            "SALES_ORDER_LINES_INVALID",
+            () => SalesOrderCommitment.Create(tenantId, companyId, orderId, []));
     }
 
     private static SalesOrderTransitionResult Apply(

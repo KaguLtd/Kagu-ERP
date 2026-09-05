@@ -60,6 +60,11 @@
           "Microsoft.IdentityModel.Logging": "8.19.2"
         }
       },
+      "Microsoft.OpenApi": {
+        "type": "Transitive",
+        "resolved": "2.7.5",
+        "contentHash": "0FA67RSnRM4tcBKqiqVu/HPdZ9+QOKbmeRjxRUGTCjPU4C0bmUhd97Dso7Yild5P7nOV6GxJ2xrK0Kv/O9xp0w=="
+      },
       "System.IdentityModel.Tokens.Jwt": {
         "type": "Transitive",
         "resolved": "8.19.2",
@@ -74,7 +79,8 @@
         "dependencies": {
           "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
           "KaguERP.BuildingBlocks.Contracts": "[1.0.0, )",
-          "Microsoft.AspNetCore.Authentication.JwtBearer": "[10.0.11, )"
+          "Microsoft.AspNetCore.Authentication.JwtBearer": "[10.0.11, )",
+          "Microsoft.AspNetCore.OpenApi": "[10.0.11, )"
         }
       },
       "kaguerp.buildingblocks.application": {
@@ -106,6 +112,7 @@
           "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
           "KaguERP.Modules.Inventory.Application": "[1.0.0, )",
           "KaguERP.Modules.Inventory.Domain": "[1.0.0, )",
+          "KaguERP.Modules.Sales.Contracts": "[1.0.0, )",
           "Npgsql": "[10.0.3, )"
         }
       },
@@ -116,6 +123,9 @@
           "KaguERP.Modules.Sales.Domain": "[1.0.0, )"
         }
       },
+      "kaguerp.modules.sales.contracts": {
+        "type": "Project"
+      },
       "kaguerp.modules.sales.domain": {
         "type": "Project"
       },
@@ -124,6 +134,7 @@
         "dependencies": {
           "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
           "KaguERP.Modules.Sales.Application": "[1.0.0, )",
+          "KaguERP.Modules.Sales.Contracts": "[1.0.0, )",
           "KaguERP.Modules.Sales.Domain": "[1.0.0, )",
           "Npgsql": "[10.0.3, )"
         }
@@ -135,6 +146,15 @@
         "contentHash": "Dy9yElSej0rVQL8LBpCLatWTKXNH6h6VBVFmGndTCf1Wge0jSvH9U8mml6ddVDAQ089q1/fDYlhyukHSgx8unQ==",
         "dependencies": {
           "Microsoft.IdentityModel.Protocols.OpenIdConnect": "8.19.2"
+        }
+      },
+      "Microsoft.AspNetCore.OpenApi": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.11, )",
+        "resolved": "10.0.11",
+        "contentHash": "R/1EATnPLU+gRfB6lwVkMcymmyAY5ppBBdRN/5lhNEiT3xP1sWccuSFkU/f1lQvN/WgRq5Vn8AhCdE3fqgsL/w==",
+        "dependencies": {
+          "Microsoft.OpenApi": "[2.7.5, 3.0.0)"
         }
       }
     }

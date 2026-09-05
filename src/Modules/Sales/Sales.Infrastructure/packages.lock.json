@@ -44,6 +44,9 @@
           "KaguERP.Modules.Sales.Domain": "[1.0.0, )"
         }
       },
+      "kaguerp.modules.sales.contracts": {
+        "type": "Project"
+      },
       "kaguerp.modules.sales.domain": {
         "type": "Project"
       }

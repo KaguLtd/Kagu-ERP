@@ -1,10 +1,182 @@
 using KaguERP.BuildingBlocks.Application.Security;
 using KaguERP.Modules.Inventory.Application.Queries;
+using KaguERP.Modules.Inventory.Application.Reservations;
 using KaguERP.Modules.Inventory.Application.Transfers;
 using KaguERP.Modules.Inventory.Domain;
 
 internal static class InventoryDomainChecks
 {
+    public static void ReservationLifecyclePreservesDemandAndQuantity()
+    {
+        Guid tenantId = Guid.NewGuid();
+        Guid companyId = Guid.NewGuid();
+        Guid actorId = Guid.NewGuid();
+        DateTimeOffset expiresAt = new(2026, 9, 6, 12, 0, 0, TimeSpan.Zero);
+        InventoryDemandSourceIdentity source = InventoryDemandSourceIdentity.Create(
+            "sales.order",
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            4);
+        InventoryReservationState active = InventoryReservationState.CreateActive(
+            Guid.NewGuid(),
+            tenantId,
+            companyId,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            InventoryUomCode.Create(" ea "),
+            source,
+            InventoryQuantity.Create(10m),
+            expiresAt);
+        InventoryReservationTransitionResult partial = InventoryReservationLifecycle.Apply(
+            active,
+            InventoryReservationTransition.Consume,
+            1,
+            InventoryQuantity.Create(4m),
+            actorId,
+            Guid.NewGuid(),
+            expiresAt.AddHours(-1));
+        InventoryReservationTransitionResult consumed = InventoryReservationLifecycle.Apply(
+            partial.State,
+            InventoryReservationTransition.Consume,
+            2,
+            InventoryQuantity.Create(6m),
+            actorId,
+            Guid.NewGuid(),
+            expiresAt);
+
+        Equal(InventoryReservationStatus.PartiallyConsumed, partial.State.Status,
+            "Reservation did not become partially consumed.");
+        Equal(6m, partial.State.RemainingQuantity.Value,
+            "Reservation remaining quantity was not derived exactly.");
+        Equal(InventoryReservationStatus.Consumed, consumed.State.Status,
+            "Reservation did not become consumed at exact quantity.");
+        Equal(decimal.Zero, consumed.State.RemainingQuantity.Value,
+            "Terminal reservation retained active quantity.");
+        Equal(source, consumed.State.Source, "Reservation lost its versioned demand source.");
+
+        Expect(
+            "INVENTORY_RESERVATION_CONSUMPTION_INVALID",
+            () => InventoryReservationLifecycle.Apply(
+                active,
+                InventoryReservationTransition.Consume,
+                1,
+                InventoryQuantity.Create(11m),
+                actorId,
+                Guid.NewGuid(),
+                expiresAt));
+        Expect(
+            "INVENTORY_RESERVATION_REASON_REQUIRED",
+            () => InventoryReservationLifecycle.Apply(
+                active,
+                InventoryReservationTransition.Release,
+                1,
+                InventoryQuantity.Create(decimal.Zero),
+                actorId,
+                Guid.NewGuid(),
+                expiresAt));
+        Expect(
+            "INVENTORY_RESERVATION_EXPIRY_NOT_REACHED",
+            () => InventoryReservationLifecycle.Apply(
+                active,
+                InventoryReservationTransition.Expire,
+                1,
+                InventoryQuantity.Create(decimal.Zero),
+                actorId,
+                Guid.NewGuid(),
+                expiresAt.AddTicks(-10)));
+    }
+
+    public static void ReservationAuthorizationRequiresWarehouseScope()
+    {
+        Guid tenantId = Guid.NewGuid();
+        Guid companyId = Guid.NewGuid();
+        Guid actorId = Guid.NewGuid();
+        Guid warehouseId = Guid.NewGuid();
+        InventoryReservationState reservation = InventoryReservationState.CreateActive(
+            Guid.NewGuid(),
+            tenantId,
+            companyId,
+            Guid.NewGuid(),
+            warehouseId,
+            InventoryUomCode.Create("EA"),
+            InventoryDemandSourceIdentity.Create(
+                "sales.order", Guid.NewGuid(), Guid.NewGuid(), 4),
+            InventoryQuantity.Create(10m));
+        var allowed = new ExecutionScope(
+            tenantId,
+            actorId,
+            [new CompanyAccess(
+                companyId,
+                [AuthorizedInventoryReservationCandidate.RequiredPermission])]);
+        InventoryWarehouseScopeEvidence evidence = InventoryWarehouseScopeEvidence.Create(
+            tenantId,
+            companyId,
+            actorId,
+            [warehouseId]);
+        InventoryReservationDemandEvidence demandEvidence = InventoryReservationDemandEvidence.Create(
+            tenantId,
+            companyId,
+            reservation.Source,
+            reservation.ItemId,
+            reservation.BaseUom,
+            InventoryQuantity.Create(10m));
+        AuthorizedInventoryReservationCandidate candidate =
+            AuthorizedInventoryReservationCandidate.Create(
+                allowed, evidence, demandEvidence, reservation);
+
+        Equal(reservation, candidate.Reservation,
+            "Reservation authorization changed the validated reservation intent.");
+        ExpectReservationAuthorization(
+            "INVENTORY_RESERVATION_PERMISSION_REQUIRED",
+            () => AuthorizedInventoryReservationCandidate.Create(
+                new ExecutionScope(tenantId, actorId, [companyId]),
+                evidence,
+                demandEvidence,
+                reservation));
+        ExpectReservationAuthorization(
+            "INVENTORY_RESERVATION_WAREHOUSE_SCOPE_REQUIRED",
+            () => AuthorizedInventoryReservationCandidate.Create(
+                allowed,
+                InventoryWarehouseScopeEvidence.Create(tenantId, companyId, actorId, []),
+                demandEvidence,
+                reservation));
+        ExpectReservationAuthorization(
+            "INVENTORY_RESERVATION_WAREHOUSE_EVIDENCE_MISMATCH",
+            () => AuthorizedInventoryReservationCandidate.Create(
+                allowed,
+                InventoryWarehouseScopeEvidence.Create(
+                    tenantId, companyId, Guid.NewGuid(), [warehouseId]),
+                demandEvidence,
+                reservation));
+        ExpectReservationAuthorization(
+            "INVENTORY_RESERVATION_DEMAND_EVIDENCE_MISMATCH",
+            () => AuthorizedInventoryReservationCandidate.Create(
+                allowed,
+                evidence,
+                InventoryReservationDemandEvidence.Create(
+                    tenantId,
+                    companyId,
+                    InventoryDemandSourceIdentity.Create(
+                        "sales.order", reservation.Source.SourceId, reservation.Source.SourceLineId, 3),
+                    reservation.ItemId,
+                    reservation.BaseUom,
+                    InventoryQuantity.Create(10m)),
+                reservation));
+        ExpectReservationAuthorization(
+            "INVENTORY_RESERVATION_EXCEEDS_DEMAND",
+            () => AuthorizedInventoryReservationCandidate.Create(
+                allowed,
+                evidence,
+                InventoryReservationDemandEvidence.Create(
+                    tenantId,
+                    companyId,
+                    reservation.Source,
+                    reservation.ItemId,
+                    reservation.BaseUom,
+                    InventoryQuantity.Create(9m)),
+                reservation));
+    }
+
     public static void QuantityBoundariesAreEnforced()
     {
         InventoryQuantity maximum = InventoryQuantity.Create(99999999999999.999999m);
@@ -558,6 +730,20 @@ internal static class InventoryDomainChecks
         }
 
         throw new InvalidOperationException($"Expected inventory authorization {expectedCode} was not thrown.");
+    }
+
+    private static void ExpectReservationAuthorization(string expectedCode, Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (InventoryReservationAuthorizationException exception) when (exception.Code == expectedCode)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"Expected inventory reservation authorization error {expectedCode}.");
     }
 
     private static void ExpectOnHandAuthorization(string expectedCode, Action action)

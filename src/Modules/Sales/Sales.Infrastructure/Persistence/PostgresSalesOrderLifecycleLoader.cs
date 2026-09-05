@@ -24,9 +24,11 @@ public static class PostgresSalesOrderLifecycleLoader
         await SetScopeAsync(connection, transaction, query.Scope, query.CompanyId, cancellationToken);
         SalesOrderLifecycleState state = await LoadStateAsync(connection, transaction, query, cancellationToken)
             ?? throw new SalesOrderNotFoundException();
+        IReadOnlyList<SalesOrderLineCommitment> lines =
+            await LoadLinesAsync(connection, transaction, query, cancellationToken);
         IReadOnlyList<SalesOrderTransitionEvent> transitions =
             await LoadTransitionsAsync(connection, transaction, query, cancellationToken);
-        return new SalesOrderLifecycleView(state, transitions);
+        return new SalesOrderLifecycleView(state, lines, transitions);
     }
 
     private static async ValueTask<SalesOrderLifecycleState?> LoadStateAsync(
@@ -98,6 +100,36 @@ public static class PostgresSalesOrderLifecycleLoader
         }
 
         return transitions;
+    }
+
+    private static async ValueTask<IReadOnlyList<SalesOrderLineCommitment>> LoadLinesAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        AuthorizedSalesOrderLifecycleQuery query,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT order_line_id,item_id,base_uom_code,ordered_base_quantity
+            FROM sales.sales_order_line
+            WHERE tenant_id=$1 AND company_id=$2 AND order_id=$3
+            ORDER BY order_line_id
+            """;
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        command.Parameters.AddWithValue(query.Scope.TenantId);
+        command.Parameters.AddWithValue(query.CompanyId);
+        command.Parameters.AddWithValue(query.OrderId);
+        var lines = new List<SalesOrderLineCommitment>();
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            lines.Add(SalesOrderLineCommitment.Create(
+                reader.GetGuid(0),
+                reader.GetGuid(1),
+                reader.GetString(2),
+                SalesOrderQuantity.Create(reader.GetDecimal(3))));
+        }
+
+        return lines;
     }
 
     private static async ValueTask SetScopeAsync(

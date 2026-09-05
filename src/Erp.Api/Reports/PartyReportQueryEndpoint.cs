@@ -73,7 +73,8 @@ internal static partial class PartyReportQueryEndpoint
 
     public static IEndpointRouteBuilder MapPartyReportQueryEndpoint(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapPost(Route, HandleAsync);
+        endpoints.MapPost(Route, HandleAsync)
+            .WithName("QueryPartyAccountReport");
         return endpoints;
     }
 

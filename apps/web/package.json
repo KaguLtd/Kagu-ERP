@@ -12,6 +12,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@kaguerp/api-client": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",

@@ -64,6 +64,9 @@
   <Folder Name="/src/Modules/Sales/Sales.Application/">
     <Project Path="src/Modules/Sales/Sales.Application/KaguERP.Modules.Sales.Application.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Sales/Sales.Contracts/">
+    <Project Path="src/Modules/Sales/Sales.Contracts/KaguERP.Modules.Sales.Contracts.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Sales/Sales.Infrastructure/">
     <Project Path="src/Modules/Sales/Sales.Infrastructure/KaguERP.Modules.Sales.Infrastructure.csproj" />
   </Folder>

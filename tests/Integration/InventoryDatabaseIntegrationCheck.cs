@@ -9,7 +9,7 @@ namespace KaguERP.DatabaseIntegrationChecks;
 
 internal static partial class DatabaseIntegrationCheck
 {
-    private static async Task AssertInventoryQuantityMovementFoundationAsync(
+    private static async Task<Guid> AssertInventoryQuantityMovementFoundationAsync(
         NpgsqlDataSource migratorDataSource,
         NpgsqlDataSource appDataSource,
         Guid tenantId,
@@ -516,6 +516,7 @@ internal static partial class DatabaseIntegrationCheck
         Assert(await reader.ReadAsync() && reader.GetBoolean(0) && reader.GetBoolean(1) &&
                !reader.GetBoolean(2) && !reader.GetBoolean(3),
             "Runtime stock movement privileges are not append-only.");
+        return itemId;
     }
 
     private static async Task InsertTransferMovementAsync(
