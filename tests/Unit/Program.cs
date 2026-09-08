@@ -101,8 +101,10 @@ var checks = new (string Name, Action Run)[]
     ("INV-QRY-001 bitemporal on-hand query boundaries", InventoryDomainChecks.OnHandQueryBoundariesAreEnforced),
     ("INV-QRY-002 stable movement timeline boundaries", InventoryDomainChecks.MovementQueryBoundariesAreEnforced),
     ("INV-RES-001 reservation demand and quantity lifecycle", InventoryDomainChecks.ReservationLifecyclePreservesDemandAndQuantity),
+    ("INV-RES-004 partial reservation capacity", InventoryDomainChecks.PartialReservationPreservesDemand),
     ("INV-RES-002 reservation permission and warehouse scope", InventoryDomainChecks.ReservationAuthorizationRequiresWarehouseScope),
     ("SALES-ORD-001/FUL-001 versioned order and fulfilment evidence", SalesDomainChecks.OrderLifecycleIsAppendOnlyAndVersioned),
+    ("SALES-DSP-001 dispatch preparation remaining quantity", SalesDomainChecks.DispatchPreparationPreservesRemainingQuantity),
     ("SALES-ORD-002 command authorization and persistence boundary", SalesDomainChecks.OrderCommandsEnforcePermissionAndPersistenceBoundary),
 };
 

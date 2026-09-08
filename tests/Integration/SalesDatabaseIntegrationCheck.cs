@@ -33,6 +33,7 @@ internal static partial class DatabaseIntegrationCheck
             approverId,
             "sales.order.approve",
             "sales.order.confirm",
+            "dispatch.create",
             AuthorizedSalesOrderLifecycleQuery.RequiredPermission);
         DateTimeOffset submittedAt = new(2026, 9, 4, 12, 0, 0, TimeSpan.Zero);
         DateTimeOffset approvedAt = submittedAt.AddMinutes(1);
@@ -139,6 +140,32 @@ internal static partial class DatabaseIntegrationCheck
                 "Sales order lifecycle query did not reconstruct its exact ordered transition history.");
             var demandSource = new PostgresSalesOrderReservationDemandSource(
                 connection, transaction, approverScope);
+            var dispatchPreparation = await PostgresSalesDispatchPreparationLoader.LoadAsync(
+                connection, transaction, approverScope, companyId, orderId, confirmed.State.Version,
+                [new(commitment.Lines[0].OrderLineId, SalesOrderQuantity.Create(6m))]);
+            Assert(dispatchPreparation.Preparation.Lines.Count == 1 &&
+                   dispatchPreparation.Preparation.Lines[0].ItemId == itemId &&
+                   dispatchPreparation.Preparation.Lines[0].RemainingAfterPreparation == 4m &&
+                   dispatchPreparation.Preparation.OrderVersion == confirmed.State.Version,
+                "Persisted order did not produce exact first-dispatch preparation.");
+            var staleDispatch = await ThrowsAsync<SalesOrderLifecycleException>(async () =>
+                await PostgresSalesDispatchPreparationLoader.LoadAsync(
+                    connection, transaction, approverScope, companyId, orderId, confirmed.State.Version - 1,
+                    [new(commitment.Lines[0].OrderLineId, SalesOrderQuantity.Create(6m))]));
+            Assert(staleDispatch.Code == "SALES_DISPATCH_VERSION_CONFLICT",
+                "Dispatch preparation accepted a stale order version.");
+            var deniedDispatch = await ThrowsAsync<SalesOrderAuthorizationException>(async () =>
+                await PostgresSalesDispatchPreparationLoader.LoadAsync(
+                    connection, transaction, makerScope, companyId, orderId, confirmed.State.Version,
+                    [new(commitment.Lines[0].OrderLineId, SalesOrderQuantity.Create(6m))]));
+            Assert(deniedDispatch.Code == "SALES_DISPATCH_CREATE_PERMISSION_REQUIRED",
+                "Dispatch preparation did not enforce create permission.");
+            await ThrowsAsync<SalesOrderNotFoundException>(async () =>
+                await PostgresSalesDispatchPreparationLoader.LoadAsync(
+                    connection, transaction,
+                    SalesScope(tenantId, otherCompanyId, approverId, "dispatch.create", "sales.order.view"),
+                    otherCompanyId, orderId, confirmed.State.Version,
+                    [new(commitment.Lines[0].OrderLineId, SalesOrderQuantity.Create(6m))]));
             SalesOrderReservationDemandSnapshot? demand = await demandSource.LoadAsync(
                 SalesOrderReservationDemandQuery.Create(
                     tenantId, companyId, orderId, confirmed.State.Version));

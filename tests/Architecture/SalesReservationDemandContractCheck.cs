@@ -37,6 +37,7 @@ internal static class SalesReservationDemandContractCheck
 
         Guid actorId = Guid.CreateVersion7();
         Guid warehouseId = Guid.CreateVersion7();
+        await CheckDeniedBeforeReadAsync(tenantId, companyId, orderId, lineId, actorId, warehouseId);
         var adapter = new SalesOrderReservationDemandEvidenceAdapter(
             new FixedDemandSource(snapshot));
         AuthorizedInventoryReservationCandidate candidate = await adapter.BuildCandidateAsync(
@@ -72,6 +73,67 @@ internal static class SalesReservationDemandContractCheck
                     [new CompanyAccess(companyId, [AuthorizedInventoryReservationCandidate.RequiredPermission])]),
                 InventoryWarehouseScopeEvidence.Create(
                     tenantId, companyId, actorId, [warehouseId])));
+    }
+
+    private static async Task CheckDeniedBeforeReadAsync(
+        Guid tenantId, Guid companyId, Guid orderId, Guid lineId, Guid actorId, Guid warehouseId)
+    {
+        var source = new CountingDemandSource();
+        var adapter = new SalesOrderReservationDemandEvidenceAdapter(source);
+        var allowedScope = new ExecutionScope(tenantId, actorId,
+            [new CompanyAccess(companyId, [AuthorizedInventoryReservationCandidate.RequiredPermission])]);
+        InventoryWarehouseScopeEvidence evidence = InventoryWarehouseScopeEvidence.Create(
+            tenantId, companyId, actorId, [warehouseId]);
+        var cases = new (ExecutionScope Scope, InventoryWarehouseScopeEvidence Evidence, string Error)[]
+        {
+            (new ExecutionScope(tenantId, actorId, new[] { companyId }), evidence,
+                "INVENTORY_RESERVATION_PERMISSION_REQUIRED"),
+            (new ExecutionScope(Guid.CreateVersion7(), actorId, new[] { companyId }), evidence,
+                "scope"),
+            (new ExecutionScope(tenantId, actorId, new[] { Guid.CreateVersion7() }), evidence,
+                "scope"),
+            (allowedScope, InventoryWarehouseScopeEvidence.Create(
+                tenantId, companyId, Guid.CreateVersion7(), [warehouseId]),
+                "INVENTORY_RESERVATION_WAREHOUSE_EVIDENCE_MISMATCH"),
+            (allowedScope, InventoryWarehouseScopeEvidence.Create(
+                tenantId, companyId, actorId, []),
+                "INVENTORY_RESERVATION_WAREHOUSE_SCOPE_REQUIRED"),
+        };
+        foreach (var scenario in cases)
+        {
+            bool denied = false;
+            try
+            {
+                await adapter.BuildCandidateAsync(
+                    SalesOrderReservationDemandQuery.Create(tenantId, companyId, orderId, 4),
+                    lineId, Guid.CreateVersion7(), warehouseId, 1m, null,
+                    scenario.Scope, scenario.Evidence);
+            }
+            catch (ExecutionScopeDeniedException) when (scenario.Error == "scope")
+            {
+                denied = true;
+            }
+            catch (InventoryReservationAuthorizationException exception)
+                when (exception.Code == scenario.Error)
+            {
+                denied = true;
+            }
+            Assert(denied && source.CallCount == 0,
+                "Reservation authorization must reject access before reading sales demand.");
+        }
+    }
+
+    private sealed class CountingDemandSource : ISalesOrderReservationDemandSource
+    {
+        public int CallCount { get; private set; }
+
+        public ValueTask<SalesOrderReservationDemandSnapshot?> LoadAsync(
+            SalesOrderReservationDemandQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            return ValueTask.FromResult<SalesOrderReservationDemandSnapshot?>(null);
+        }
     }
 
     private static async Task ExpectDemandLineUnavailableAsync(

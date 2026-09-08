@@ -782,6 +782,34 @@ internal static class InventoryDomainChecks
         }
     }
 
+    public static void PartialReservationPreservesDemand()
+    {
+        Guid companyId = Guid.NewGuid();
+        var scope = new ExecutionScope(Guid.NewGuid(), Guid.NewGuid(),
+            [new CompanyAccess(companyId, [AuthorizedInventoryReservationCandidate.RequiredPermission])]);
+        Guid requestId = Guid.NewGuid();
+        Guid warehouseId = Guid.NewGuid();
+        var source = InventoryDemandSourceIdentity.Create("sales.order", Guid.NewGuid(), Guid.NewGuid(), 4);
+        var first = new InventoryReservationRequest(scope, companyId, requestId, warehouseId,
+            source, InventoryQuantity.Create(1m), new DateOnly(2026, 9, 8));
+        var equivalent = new InventoryReservationRequest(scope, companyId, requestId, warehouseId,
+            source, InventoryQuantity.Create(1.000000m), new DateOnly(2026, 9, 8));
+        Equal(first.Fingerprint, equivalent.Fingerprint, "Decimal formatting must not change request identity.");
+        var changed = new InventoryReservationRequest(scope, companyId, requestId, warehouseId,
+            source, InventoryQuantity.Create(1m), new DateOnly(2026, 9, 9));
+        Equal(false, first.Fingerprint == changed.Fingerprint, "Effective date must participate in request identity.");
+        static InventoryQuantity Q(decimal value) => InventoryQuantity.Create(value);
+        for (int stock = -2; stock <= 12; stock++)
+        {
+            var result = InventoryPartialReservation.Calculate(Q(10m), Q(stock), Q(2m), Q(1m));
+            Equal(10m, result.Reserved.Value + result.Unreserved.Value, "Partial reservation lost demand.");
+            Equal(decimal.Min(10m, decimal.Max(0m, stock - 3m)), result.Reserved.Value,
+                "Reservation did not subtract reserved and blocked stock.");
+        }
+        var fractional = InventoryPartialReservation.Calculate(Q(1m), Q(0.123456m), Q(0m), Q(0m));
+        Equal(0.876544m, fractional.Unreserved.Value, "Partial reservation rounded decimal quantity.");
+    }
+
     private sealed record InventoryFixture(
         Guid TenantId,
         Guid CompanyId,

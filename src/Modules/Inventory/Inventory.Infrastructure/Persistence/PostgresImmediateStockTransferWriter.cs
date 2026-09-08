@@ -39,6 +39,10 @@ public static class PostgresImmediateStockTransferWriter
                 cancellationToken);
         _ = AuthorizedImmediateStockTransferCandidate.Create(scope, currentWarehouseScope, transfer);
 
+        await PostgresInventoryPositionLock.AcquireAsync(connection, transaction, scope, issue.CompanyId,
+            [new(issue.ItemId, issue.WarehouseId, issue.BaseUom),
+             new(receipt.ItemId, receipt.WarehouseId, receipt.BaseUom)], cancellationToken);
+
         await ExecuteTransactionCommandAsync(connection, transaction, $"SAVEPOINT {SavepointName}", cancellationToken);
         bool issueCreated = await TryInsertAsync(connection, transaction, scope, issue, cancellationToken);
         bool receiptCreated = await TryInsertAsync(connection, transaction, scope, receipt, cancellationToken);

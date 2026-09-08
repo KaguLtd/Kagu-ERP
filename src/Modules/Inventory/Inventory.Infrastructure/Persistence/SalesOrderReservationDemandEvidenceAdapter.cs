@@ -58,6 +58,8 @@ public sealed class SalesOrderReservationDemandEvidenceAdapter(
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(warehouseScope);
+        AuthorizedInventoryReservationCandidate.EnsureAccess(
+            scope, warehouseScope, query.TenantId, query.CompanyId, warehouseId);
         if (orderLineId == Guid.Empty)
         {
             throw new InventoryReservationDemandLineUnavailableException();

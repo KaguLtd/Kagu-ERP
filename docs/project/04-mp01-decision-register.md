@@ -64,6 +64,25 @@ Secret, credential, gerçek kişisel veri, tam VKN/IBAN veya hassas kurum cevab�
 | DEC-MP01-022 | Ödeme/tahsilat ile banka mutabakatının muhasebe anı | Muhasebe + finans | approved | Gerçek banka formatı/credential | Posted ekonomik olay + transit hesap; reconciliation yalnız doğrular |
 | DEC-MP01-023 | Party rapor projection yenileme tetikleyicisi | Ürün + teknik | approved | Recurring schedule UI/API | İlk sürümde yetkili manuel, idempotent enqueue |
 | DEC-MP01-024 | Geliştirme ve MP kapanış test kadansı | Kullanıcı + teknik | approved | — | Dilimde dar risk testi; tam regresyon MP kapanışında |
+| DEC-MP01-025 | Depo seçimi, kısmi rezervasyon ve süre sonu | Kullanıcı + teknik | approved | Değerleme/backdate ve production kabulü ayrı | Seçilen depo, mevcut miktar kadar rezervasyon, otomatik expiry yok |
+
+### DEC-MP01-025 — Rezervasyon davranışı
+
+```yaml
+decision_id: DEC-MP01-025
+title: "Depo seçimi, kısmi rezervasyon ve süre sonu"
+status: approved
+authority: "KaguLtd repository sahibi — bu görevdeki kullanıcı"
+owner_role: "Ürün sahibi + teknik"
+owner_name: "atanmadı; DEC-MP01-019"
+decision: "Sipariş onayında kullanıcı yetkili depoyu seçer. Mevcut miktar kadar kısmi rezervasyon yapılır; kalanı siparişte açık bekler. Elde olmayan miktar rezerve/sevk edilmez. Otomatik expiry yoktur; sevk rezervasyonu tüketir, iptal kalan rezervasyonu serbest bırakır. Manuel release yetki ve gerekçe ister."
+source_or_evidence: "Bu görevde üç önerinin uygulama sorusuna verilen Devam yanıtı; 2026-09-07-reservation-policy-proposal.md"
+effective_from: 2026-09-07
+review_due: 2027-06-30
+blocks: [production-acceptance]
+affected_requirements: [INV-RES, SALES-DSP]
+notes: "Stok kilit protokolü teknik uygulama sorumluluğudur. DEC-MP01-011 değerleme/backdate/sayım kararları açık kalır."
+```
 
 ### DEC-MP01-001 — Tenant ve şirket topolojisi
 

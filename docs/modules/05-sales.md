@@ -83,6 +83,22 @@ Durum:
 
 ## 6. Sevk
 
+- `SALES-DSP-003`: İlk sevk hazırlama sorgusu `dispatch.create` ve `sales.order.view` izinleriyle
+  caller transaction içinde scope filtreli sipariş loader'ını kullanır. Header `FOR SHARE` kilidi,
+  exact expected version ve timeline tutarlılığı korunur. Şimdilik yalnız confirmed ve geçmişinde
+  fulfilment olmayan sipariş kabul edilir; kısmi sevkler persisted allocation loader'ı tamamlanana
+  kadar reddedilir. Sonuç read-only hazırlıktır; allocation veya stok rezervasyonu değildir.
+
+- `SALES-DSP-001`: Sevk hazırlığı exact sipariş version ve aynı scope'taki commitment/fulfilment
+  snapshot'ıyla oluşturulur. Confirmed veya partially-fulfilled siparişte unique satırın pozitif
+  miktarı önceki allocation'lar düşüldükten sonraki kalanı aşamaz. Ürün/base-UOM commitment'tan
+  alınır. Hazırlık immutable'dır; stok ayırmaz, posted sevk veya allocation oluşturmaz.
+  Persistence öncesinde güncel kanıt ve yetkiler aynı transaction'da tekrar doğrulanmalıdır.
+- `SALES-DSP-002`: Uygulama seviyesinde hazırlık `dispatch.create` ve siparişin exact tenant/company
+  kapsamını ister. Kontrol satır hazırlığından önce yapılır; actor sonucu taşıyan scope'ta korunur.
+  `sales.order.create` veya `dispatch.post`, `dispatch.create` yerine geçmez. Bu miktar hazırlığı
+  depo seçmediğinden depo erişim izni veya stok çıkış yetkisi sayılmaz; bunlar posting öncesinde zorunludur.
+
 - Yalnız confirmed ve kalan quantity.
 - Warehouse scope, available/reservation, lot/serial/expiry validation.
 - Pick/pack opsiyonel; MVP'de basit dispatch.

@@ -39,8 +39,24 @@ public sealed class AuthorizedInventoryReservationCandidate
         ArgumentNullException.ThrowIfNull(demandEvidence);
         ArgumentNullException.ThrowIfNull(reservation);
 
-        scope.EnsureAllowed(reservation.TenantId, reservation.CompanyId);
-        if (!scope.HasPermission(reservation.CompanyId, RequiredPermission))
+        EnsureAccess(scope, warehouseScope, reservation.TenantId, reservation.CompanyId, reservation.WarehouseId);
+        demandEvidence.EnsureMatches(reservation);
+
+        return new AuthorizedInventoryReservationCandidate(
+            scope, warehouseScope, demandEvidence, reservation);
+    }
+
+    public static void EnsureAccess(
+        ExecutionScope scope,
+        InventoryWarehouseScopeEvidence warehouseScope,
+        Guid tenantId,
+        Guid companyId,
+        Guid warehouseId)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(warehouseScope);
+        scope.EnsureAllowed(tenantId, companyId);
+        if (!scope.HasPermission(companyId, RequiredPermission))
         {
             throw new InventoryReservationAuthorizationException(
                 "INVENTORY_RESERVATION_PERMISSION_REQUIRED",
@@ -49,7 +65,7 @@ public sealed class AuthorizedInventoryReservationCandidate
 
         try
         {
-            warehouseScope.EnsureMatches(reservation.TenantId, reservation.CompanyId, scope.ActorId);
+            warehouseScope.EnsureMatches(tenantId, companyId, scope.ActorId);
         }
         catch (InventoryTransferAuthorizationException exception)
         {
@@ -59,17 +75,13 @@ public sealed class AuthorizedInventoryReservationCandidate
                 exception);
         }
 
-        if (!warehouseScope.WarehouseIds.Contains(reservation.WarehouseId))
+        if (!warehouseScope.WarehouseIds.Contains(warehouseId))
         {
             throw new InventoryReservationAuthorizationException(
                 "INVENTORY_RESERVATION_WAREHOUSE_SCOPE_REQUIRED",
                 "The active actor must be scoped to the reservation warehouse.");
         }
 
-        demandEvidence.EnsureMatches(reservation);
-
-        return new AuthorizedInventoryReservationCandidate(
-            scope, warehouseScope, demandEvidence, reservation);
     }
 }
 

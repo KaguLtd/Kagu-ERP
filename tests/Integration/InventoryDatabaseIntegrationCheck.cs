@@ -1,5 +1,6 @@
 using KaguERP.BuildingBlocks.Application.Security;
 using KaguERP.Modules.Inventory.Application.Queries;
+using KaguERP.Modules.Inventory.Application.Reservations;
 using KaguERP.Modules.Inventory.Application.Transfers;
 using KaguERP.Modules.Inventory.Domain;
 using KaguERP.Modules.Inventory.Infrastructure.Persistence;
@@ -9,6 +10,221 @@ namespace KaguERP.DatabaseIntegrationChecks;
 
 internal static partial class DatabaseIntegrationCheck
 {
+    private static async Task AssertReservationLifecyclePersistenceAsync(
+        NpgsqlDataSource dataSource, Guid tenantId, Guid companyId, Guid warehouseId, Guid actorId, Guid itemId)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        Guid reservationId = Guid.CreateVersion7();
+        var scope = new ExecutionScope(tenantId, actorId,
+            [new CompanyAccess(companyId, [AuthorizedInventoryReservationCandidate.RequiredPermission])]);
+        var request = new InventoryReservationRequest(scope, companyId, Guid.CreateVersion7(), warehouseId,
+            InventoryDemandSourceIdentity.Create("sales.order", Guid.CreateVersion7(), Guid.CreateVersion7(), 4),
+            InventoryQuantity.Create(10m), new DateOnly(2026,9,8));
+        await using (var seed = new NpgsqlCommand("""
+            INSERT INTO inventory.reservation_creation
+                (tenant_id,company_id,warehouse_id,recorded_by,item_id,request_id,reservation_id,
+                 source_id,source_line_id,source_type,source_version,base_uom_code,requested_quantity,
+                 reserved_quantity,effective_date,recorded_at,correlation_id,policy_version)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'sales.order',4,'EA',10,10,DATE '2026-09-08',
+                    TIMESTAMPTZ '2026-09-08 12:00:00+00',$6,'DEC-MP01-025/v1');
+            INSERT INTO inventory.reservation_request_result
+                (tenant_id,company_id,warehouse_id,recorded_by,request_id,reservation_id,
+                 requested_quantity,reserved_quantity,request_fingerprint)
+            VALUES ($1,$2,$3,$4,$6,$7,10,10,$10);
+            """, connection, transaction))
+        {
+            foreach (Guid id in new[] { tenantId,companyId,warehouseId,actorId,itemId,request.RequestId,
+                reservationId,request.Source.SourceId,request.Source.SourceLineId })
+                seed.Parameters.AddWithValue(id);
+            seed.Parameters.AddWithValue(request.Fingerprint);
+            await seed.ExecuteNonQueryAsync();
+        }
+        async Task InsertEvent(long version, short transition, decimal quantity, decimal consumed, decimal remaining)
+        {
+            await using var insert = new NpgsqlCommand("""
+                INSERT INTO inventory.reservation_lifecycle_event
+                    (tenant_id,company_id,reservation_id,event_id,version,transition,quantity,
+                     consumed_quantity,remaining_quantity,effective_date,occurred_at,actor_id,correlation_id,reason)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,DATE '2026-09-08',TIMESTAMPTZ '2026-09-08 12:01:00+00',$10,$4,'fixture')
+                """, connection, transaction);
+            insert.Parameters.AddWithValue(tenantId);
+            insert.Parameters.AddWithValue(companyId);
+            insert.Parameters.AddWithValue(reservationId);
+            insert.Parameters.AddWithValue(Guid.CreateVersion7());
+            insert.Parameters.AddWithValue(version);
+            insert.Parameters.AddWithValue(transition);
+            insert.Parameters.AddWithValue(quantity);
+            insert.Parameters.AddWithValue(consumed);
+            insert.Parameters.AddWithValue(remaining);
+            insert.Parameters.AddWithValue(actorId);
+            await insert.ExecuteNonQueryAsync();
+        }
+        await InsertEvent(2,1,6m,6m,4m);
+        await transaction.SaveAsync("excess_consumption");
+        var excessive = await ThrowsAsync<PostgresException>(() => InsertEvent(3,1,5m,11m,0m));
+        Assert(excessive.SqlState == "23514", "Reservation cannot consume beyond its remaining quantity.");
+        await transaction.RollbackAsync("excess_consumption");
+        await InsertEvent(3,2,0m,6m,0m);
+        var demand = InventoryReservationDemandEvidence.Create(tenantId,companyId,request.Source,
+            itemId,InventoryUomCode.Create("EA"),InventoryQuantity.Create(10m));
+        await PostgresInventoryReservationRequestGate.AcquireAsync(connection,transaction,request);
+        var balance = await PostgresInventoryReservationBalanceLoader.LoadAsync(connection,transaction,request,demand);
+        Assert(balance.ActiveReservedAtPosition == 0m && balance.CommittedQuantityForDemand == 6m,
+            "Release must clear active reservation while retaining the six consumed units of demand.");
+        var terminal = await ThrowsAsync<PostgresException>(() => InsertEvent(4,1,1m,7m,0m));
+        Assert(terminal.SqlState == "23514", "Released reservation cannot consume again.");
+        await transaction.RollbackAsync();
+    }
+
+    private static async Task AssertReservationRequestGateAsync(
+        NpgsqlDataSource ownerDataSource, NpgsqlDataSource appDataSource,
+        Guid tenantId, Guid companyId, Guid warehouseId, Guid actorId, Guid itemId)
+    {
+        var scope = new ExecutionScope(tenantId, actorId,
+            [new CompanyAccess(companyId, [AuthorizedInventoryReservationCandidate.RequiredPermission])]);
+        var request = new InventoryReservationRequest(scope, companyId, Guid.CreateVersion7(), warehouseId,
+            InventoryDemandSourceIdentity.Create("sales.order", Guid.CreateVersion7(), Guid.CreateVersion7(), 4),
+            InventoryQuantity.Create(10m), new DateOnly(2026, 9, 8));
+        var changed = new InventoryReservationRequest(scope, companyId, request.RequestId, warehouseId,
+            request.Source, InventoryQuantity.Create(11m), request.EffectiveDate);
+        await using var first = await ownerDataSource.OpenConnectionAsync();
+        await using var second = await appDataSource.OpenConnectionAsync();
+        await using var owner = await first.BeginTransactionAsync();
+        Assert(await PostgresInventoryReservationRequestGate.AcquireAsync(first, owner, request) is null,
+            "A new reservation request must have no replay result.");
+        await using (var competitor = await second.BeginTransactionAsync())
+        {
+            await using var timeout = new NpgsqlCommand("SET LOCAL lock_timeout='100ms'", second, competitor);
+            await timeout.ExecuteNonQueryAsync();
+            var blocked = await ThrowsAsync<PostgresException>(async () =>
+                await PostgresInventoryReservationRequestGate.AcquireAsync(second, competitor, changed));
+            Assert(blocked.SqlState == "55P03", "Changed contents must still contend for the same request lock.");
+            await competitor.RollbackAsync();
+        }
+        await using (var insert = new NpgsqlCommand("""
+            INSERT INTO inventory.reservation_request_result
+                (tenant_id,company_id,request_id,warehouse_id,request_fingerprint,
+                 requested_quantity,reserved_quantity,reservation_id,recorded_by)
+            VALUES ($1,$2,$3,$4,$5,10,0,NULL,$6)
+            """, first, owner))
+        {
+            insert.Parameters.AddWithValue(tenantId);
+            insert.Parameters.AddWithValue(companyId);
+            insert.Parameters.AddWithValue(request.RequestId);
+            insert.Parameters.AddWithValue(warehouseId);
+            insert.Parameters.AddWithValue(request.Fingerprint);
+            insert.Parameters.AddWithValue(actorId);
+            await insert.ExecuteNonQueryAsync();
+        }
+        await owner.CommitAsync();
+        await using var retry = await second.BeginTransactionAsync();
+        var replay = await PostgresInventoryReservationRequestGate.AcquireAsync(second, retry, request);
+        Assert(replay is not null && replay.ReservedQuantity.IsZero && replay.ReservationId is null,
+            "Runtime-role retry must return the committed zero result after acquiring the lock.");
+        var demand = InventoryReservationDemandEvidence.Create(tenantId, companyId, request.Source,
+            itemId, InventoryUomCode.Create("EA"), InventoryQuantity.Create(10m));
+        var balance = await PostgresInventoryReservationBalanceLoader.LoadAsync(second, retry, request, demand);
+        Assert(balance.OnHand.IsZero && balance.CreatedQuantityAtPosition == 0m &&
+            balance.CreatedQuantityForDemand == 0m && balance.EffectiveAsOf == request.EffectiveDate &&
+            balance.RecordedCutoff.Offset == TimeSpan.Zero,
+            "Empty inventory balances must remain zero; zero request results must not reserve stock.");
+        await ThrowsAsync<InventoryReservationRequestConflictException>(async () =>
+            await PostgresInventoryReservationRequestGate.AcquireAsync(second, retry, changed));
+        await retry.RollbackAsync();
+    }
+
+    private static async Task AssertReservationZeroResultAsync(
+        NpgsqlDataSource dataSource, Guid tenantId, Guid companyId, Guid warehouseId, Guid actorId)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        Guid requestId = Guid.CreateVersion7();
+        var scope = new ExecutionScope(tenantId, actorId,
+            [new CompanyAccess(companyId, [AuthorizedInventoryReservationCandidate.RequiredPermission])]);
+        var source = InventoryDemandSourceIdentity.Create("sales.order", Guid.CreateVersion7(), Guid.CreateVersion7(), 4);
+        var request = new InventoryReservationRequest(scope, companyId, requestId, warehouseId,
+            source, InventoryQuantity.Create(10m), new DateOnly(2026, 9, 8));
+        await using var insert = new NpgsqlCommand("""
+            INSERT INTO inventory.reservation_request_result
+                (tenant_id,company_id,request_id,warehouse_id,request_fingerprint,
+                 requested_quantity,reserved_quantity,reservation_id,recorded_by)
+            VALUES ($1,$2,$3,$4,$6,10,0,NULL,$5)
+            """, connection, transaction);
+        insert.Parameters.AddWithValue(tenantId);
+        insert.Parameters.AddWithValue(companyId);
+        insert.Parameters.AddWithValue(requestId);
+        insert.Parameters.AddWithValue(warehouseId);
+        insert.Parameters.AddWithValue(actorId);
+        insert.Parameters.AddWithValue(request.Fingerprint);
+        Assert(await insert.ExecuteNonQueryAsync() == 1, "Zero allocation must have a durable request result.");
+        var replay = await PostgresInventoryReservationReplayLoader.LoadAsync(connection, transaction, request);
+        Assert(replay is not null && replay.ReservationId is null && replay.ReservedQuantity.IsZero &&
+            replay.RequestedQuantity.Value == 10m, "Zero-result retry must return the original zero allocation.");
+        var changed = new InventoryReservationRequest(scope, companyId, requestId, warehouseId,
+            source, InventoryQuantity.Create(11m), new DateOnly(2026, 9, 8));
+        await ThrowsAsync<InventoryReservationRequestConflictException>(async () =>
+            await PostgresInventoryReservationReplayLoader.LoadAsync(connection, transaction, changed));
+        await transaction.SaveAsync("duplicate_result");
+        var duplicate = await ThrowsAsync<PostgresException>(async () => await insert.ExecuteNonQueryAsync());
+        Assert(duplicate.SqlState == "23505", "Duplicate reservation request must be rejected.");
+        await transaction.RollbackAsync("duplicate_result");
+        await using var mutate = new NpgsqlCommand("""
+            UPDATE inventory.reservation_request_result SET requested_quantity=11
+            WHERE tenant_id=$1 AND company_id=$2 AND request_id=$3
+            """, connection, transaction);
+        mutate.Parameters.AddWithValue(tenantId);
+        mutate.Parameters.AddWithValue(companyId);
+        mutate.Parameters.AddWithValue(requestId);
+        var immutable = await ThrowsAsync<PostgresException>(async () => await mutate.ExecuteNonQueryAsync());
+        Assert(immutable.SqlState == "23514", "Reservation result must remain immutable even for the migration role.");
+        await transaction.RollbackAsync();
+    }
+
+    private static async Task AssertReservationCreationSchemaAsync(NpgsqlDataSource dataSource)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var command = new NpgsqlCommand("""
+            SELECT c.relrowsecurity AND c.relforcerowsecurity
+                AND has_table_privilege(current_user, c.oid, 'SELECT')
+                AND NOT has_table_privilege(current_user, c.oid, 'INSERT')
+                AND NOT has_table_privilege(current_user, c.oid, 'UPDATE')
+                AND NOT has_table_privilege(current_user, c.oid, 'DELETE')
+                AND EXISTS (SELECT 1 FROM pg_constraint k WHERE k.conrelid=c.oid
+                    AND k.conname='uq_reservation_creation_request' AND k.contype='u')
+                AND EXISTS (SELECT 1 FROM pg_constraint k WHERE k.conrelid=c.oid
+                    AND k.conname='ck_reservation_creation_quantity' AND k.contype='c')
+                AND EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid=c.oid
+                    AND t.tgname='trg_reservation_creation_immutable' AND t.tgenabled='O')
+            FROM pg_class c WHERE c.oid='inventory.reservation_creation'::regclass
+            """, connection);
+        Assert(await command.ExecuteScalarAsync() is true,
+            "Reservation creation must enforce RLS, request uniqueness, quantity and immutability while writes remain closed.");
+    }
+
+    private static async Task AssertInventoryPositionLockAsync(
+        NpgsqlDataSource dataSource, ExecutionScope scope, Guid companyId, Guid itemId, Guid warehouseId)
+    {
+        InventoryPositionLockTarget[] targets = [new(itemId, warehouseId, InventoryUomCode.Create("EA"))];
+        await using var first = await dataSource.OpenConnectionAsync();
+        await using var second = await dataSource.OpenConnectionAsync();
+        await using var owner = await first.BeginTransactionAsync();
+        await PostgresInventoryPositionLock.AcquireAsync(first, owner, scope, companyId, targets);
+        await using (var competitor = await second.BeginTransactionAsync())
+        {
+            await using var timeout = new NpgsqlCommand("SET LOCAL lock_timeout = '100ms'", second, competitor);
+            await timeout.ExecuteNonQueryAsync();
+            var conflict = await ThrowsAsync<PostgresException>(async () =>
+                await PostgresInventoryPositionLock.AcquireAsync(second, competitor, scope, companyId, targets));
+            Assert(conflict.SqlState == "55P03", "The same inventory position must wait for its transaction lock.");
+            await competitor.RollbackAsync();
+        }
+        await owner.RollbackAsync();
+        await using var retry = await second.BeginTransactionAsync();
+        await PostgresInventoryPositionLock.AcquireAsync(second, retry, scope, companyId, targets);
+        await retry.RollbackAsync();
+    }
+
     private static async Task<Guid> AssertInventoryQuantityMovementFoundationAsync(
         NpgsqlDataSource migratorDataSource,
         NpgsqlDataSource appDataSource,
@@ -18,6 +234,7 @@ internal static partial class DatabaseIntegrationCheck
         Guid actorId)
     {
         Guid itemId = Guid.CreateVersion7();
+        await AssertReservationCreationSchemaAsync(appDataSource);
         Guid sourceWarehouseId = Guid.CreateVersion7();
         Guid destinationWarehouseId = Guid.CreateVersion7();
         Guid transferId = Guid.CreateVersion7();
@@ -41,6 +258,7 @@ internal static partial class DatabaseIntegrationCheck
             sourceLineId,
             1,
             "stock-transfer");
+        await AssertInventoryPositionLockAsync(appDataSource, scope, companyId, itemId, sourceWarehouseId);
         StockMovementDraft issue = CreateTransferMovement(
             tenantId,
             companyId,
@@ -147,6 +365,11 @@ internal static partial class DatabaseIntegrationCheck
         }
 
         InventoryWarehouseScopeEvidence warehouseScope;
+        await AssertReservationZeroResultAsync(migratorDataSource, tenantId, companyId, sourceWarehouseId, actorId);
+        await AssertReservationRequestGateAsync(migratorDataSource, appDataSource,
+            tenantId, companyId, sourceWarehouseId, actorId, itemId);
+        await AssertReservationLifecyclePersistenceAsync(migratorDataSource,
+            tenantId,companyId,sourceWarehouseId,actorId,itemId);
         AuthorizedImmediateStockTransferCandidate candidate;
         await using (NpgsqlConnection connection = await appDataSource.OpenConnectionAsync())
         await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())

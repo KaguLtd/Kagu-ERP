@@ -184,6 +184,76 @@ internal static class SalesDomainChecks
             () => SalesOrderCommitment.Create(tenantId, companyId, orderId, []));
     }
 
+    public static void DispatchPreparationPreservesRemainingQuantity()
+    {
+        Guid maker = Guid.NewGuid();
+        Guid approver = Guid.NewGuid();
+        var draft = SalesOrderLifecycleState.CreateDraft(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), maker);
+        var submitted = Apply(draft, SalesOrderTransition.Submit, maker).State;
+        var approved = Apply(submitted, SalesOrderTransition.Approve, approver).State;
+        var confirmed = Apply(approved, SalesOrderTransition.Confirm, approver).State;
+        var line = SalesOrderLineCommitment.Create(Guid.NewGuid(), Guid.NewGuid(), "EA", SalesOrderQuantity.Create(10m));
+        var commitment = SalesOrderCommitment.Create(draft.TenantId, draft.CompanyId, draft.OrderId, [line]);
+        var evidence = SalesOrderFulfilmentEvidence.Create(draft.TenantId, draft.CompanyId, draft.OrderId,
+            [line], [CreateAllocation(draft, line, 6m)]);
+        var partial = Apply(confirmed, SalesOrderTransition.RecordPartialFulfilment, approver,
+            fulfilmentEvidence: evidence).State;
+        var requests = new List<SalesDispatchLineRequest> { new(line.OrderLineId, SalesOrderQuantity.Create(4m)) };
+        var preparation = SalesDispatchPreparation.Create(partial, partial.Version, commitment, evidence, requests);
+        requests.Clear();
+        Equal(1, preparation.Lines.Count, "Preparation must copy requests.");
+        Equal(0m, preparation.Lines[0].RemainingAfterPreparation, "10 minus 6 minus 4 must be zero.");
+        Equal(line.ItemId, preparation.Lines[0].ItemId, "Prepared item must come from commitment.");
+        Equal("EA", preparation.Lines[0].BaseUomCode, "Prepared UOM must come from commitment.");
+        var allowedScope = new ExecutionScope(partial.TenantId, maker,
+            [new CompanyAccess(partial.CompanyId, [AuthorizedSalesDispatchPreparation.RequiredPermission])]);
+        var authorized = AuthorizedSalesDispatchPreparation.Create(allowedScope, partial, partial.Version,
+            commitment, evidence, [new(line.OrderLineId, SalesOrderQuantity.Create(4m))]);
+        Equal(maker, authorized.Scope.ActorId, "Dispatch preparation must preserve actor identity.");
+        Equal(0m, authorized.Preparation.Lines[0].RemainingAfterPreparation, "Authorized preparation must preserve remaining quantity.");
+        ExpectAuthorization("SALES_DISPATCH_CREATE_PERMISSION_REQUIRED", () =>
+            AuthorizedSalesDispatchPreparation.Create(
+                new ExecutionScope(partial.TenantId, maker,
+                    [new CompanyAccess(partial.CompanyId, ["sales.order.create", "dispatch.post"])]),
+                partial, partial.Version, commitment, evidence, []));
+        foreach (ExecutionScope deniedScope in new[]
+        {
+            new ExecutionScope(Guid.NewGuid(), maker, new[] { partial.CompanyId }),
+            new ExecutionScope(partial.TenantId, maker, new[] { Guid.NewGuid() }),
+        })
+        {
+            bool denied = false;
+            try
+            {
+                AuthorizedSalesDispatchPreparation.Create(deniedScope, partial, partial.Version,
+                    commitment, evidence, []);
+            }
+            catch (ExecutionScopeDeniedException)
+            {
+                denied = true;
+            }
+            Equal(true, denied, "Dispatch preparation must reject foreign tenant/company before line validation.");
+        }
+        Expect("SALES_DISPATCH_EXCEEDS_REMAINING", () => SalesDispatchPreparation.Create(
+            partial, partial.Version, commitment, evidence, [new(line.OrderLineId, SalesOrderQuantity.Create(4.000001m))]));
+        Expect("SALES_DISPATCH_VERSION_CONFLICT", () => SalesDispatchPreparation.Create(
+            partial, partial.Version - 1, commitment, evidence, [new(line.OrderLineId, SalesOrderQuantity.Create(1m))]));
+        Expect("SALES_DISPATCH_STATUS_INVALID", () => SalesDispatchPreparation.Create(
+            draft, draft.Version, commitment, evidence, []));
+        Expect("SALES_DISPATCH_LINES_INVALID", () => SalesDispatchPreparation.Create(
+            partial, partial.Version, commitment, evidence, []));
+        Expect("SALES_DISPATCH_LINES_INVALID", () => SalesDispatchPreparation.Create(
+            partial, partial.Version, commitment, evidence,
+            [new(line.OrderLineId, SalesOrderQuantity.Create(1m)), new(line.OrderLineId, SalesOrderQuantity.Create(1m))]));
+        Expect("SALES_DISPATCH_LINE_UNAVAILABLE", () => SalesDispatchPreparation.Create(
+            partial, partial.Version, commitment, evidence, [new(Guid.NewGuid(), SalesOrderQuantity.Create(1m))]));
+        Expect("SALES_DISPATCH_EVIDENCE_MISMATCH", () => SalesDispatchPreparation.Create(
+            confirmed, confirmed.Version, commitment, evidence, [new(line.OrderLineId, SalesOrderQuantity.Create(1m))]));
+        var otherCommitment = SalesOrderCommitment.Create(draft.TenantId, Guid.NewGuid(), draft.OrderId, [line]);
+        Expect("SALES_ORDER_COMMITMENT_SCOPE_MISMATCH", () => SalesDispatchPreparation.Create(
+            partial, partial.Version, otherCommitment, evidence, [new(line.OrderLineId, SalesOrderQuantity.Create(1m))]));
+    }
+
     private static SalesOrderTransitionResult Apply(
         SalesOrderLifecycleState state,
         SalesOrderTransition transition,
