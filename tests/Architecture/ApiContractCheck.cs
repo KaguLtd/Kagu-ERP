@@ -32,6 +32,7 @@ internal static class ApiContractCheck
         AssertCrossScopeResourceIsRejected();
         AssertPartyReportQueryContract();
         AssertSalesOrderLifecycleContract();
+        await SalesStockOrderHttpContractCheck.RunAsync();
 
         Console.WriteLine("API application-scope, correlation and safe telemetry contract checks passed.");
     }

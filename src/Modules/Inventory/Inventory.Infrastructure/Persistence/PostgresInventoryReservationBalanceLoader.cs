@@ -1,6 +1,3 @@
-using System.Buffers.Binary;
-using System.Security.Cryptography;
-using System.Text;
 using KaguERP.Modules.Inventory.Application.Reservations;
 using KaguERP.Modules.Inventory.Domain;
 using Npgsql;
@@ -14,12 +11,13 @@ public sealed record InventoryReservationBalanceSnapshot(
     decimal CreatedQuantityAtPosition,
     decimal CreatedQuantityForDemand,
     decimal ActiveReservedAtPosition,
-    decimal CommittedQuantityForDemand);
+    decimal CommittedQuantityForDemand,
+    decimal BlockedAtPosition);
 
 public static class PostgresInventoryReservationBalanceLoader
 {
     /// <summary>
-    /// Loads gross creation totals and lifecycle balances. Blocked stock is still a separate dependency.
+    /// Loads gross creation totals, lifecycle balances and blocked quantity in the same statement snapshot.
     /// The caller must acquire the request gate before this loader and keep the transaction open.
     /// Demand evidence must be loaded from the producer's contract in that same transaction.
     /// </summary>
@@ -52,14 +50,8 @@ public static class PostgresInventoryReservationBalanceLoader
                 "Requested quantity exceeds the authoritative demand capacity.");
         }
 
-        // Version and warehouse deliberately do not split the same commercial demand's lock.
-        string canonical = $"kagu.inventory.reservation-demand.v1/{demand.TenantId:D}/{demand.CompanyId:D}/{demand.Source.SourceType}/{demand.Source.SourceId:D}/{demand.Source.SourceLineId:D}";
-        long key = BinaryPrimitives.ReadInt64BigEndian(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
-        await using (var lockCommand = new NpgsqlCommand("SELECT pg_advisory_xact_lock($1)", connection, transaction))
-        {
-            lockCommand.Parameters.AddWithValue(key);
-            await lockCommand.ExecuteNonQueryAsync(cancellationToken);
-        }
+        await PostgresInventoryDemandLock.AcquireAsync(connection, transaction, request.Scope,
+            request.CompanyId, [demand.Source], cancellationToken);
         await PostgresInventoryPositionLock.AcquireAsync(connection, transaction, request.Scope, request.CompanyId,
             [new(demand.ItemId, request.WarehouseId, demand.BaseUom)], cancellationToken);
 
@@ -97,7 +89,14 @@ public static class PostgresInventoryReservationBalanceLoader
                 (SELECT coalesce(sum(remaining),0) FROM balances
                  WHERE item_id=$3 AND warehouse_id=$4 AND base_uom_code=$5),
                 (SELECT coalesce(sum(remaining+consumed),0) FROM balances
-                 WHERE source_type=$7 AND source_id=$8 AND source_line_id=$9)
+                 WHERE source_type=$7 AND source_id=$8 AND source_line_id=$9),
+                (SELECT coalesce(sum(blocked_quantity),0) FROM (
+                    SELECT DISTINCT ON (block_id) blocked_quantity
+                    FROM inventory.stock_block_event
+                    WHERE tenant_id=$1 AND company_id=$2 AND item_id=$3 AND warehouse_id=$4
+                      AND base_uom_code=$5 AND effective_date <= $6 AND recorded_at <= cutoff.recorded_at
+                    ORDER BY block_id,version DESC
+                ) current_blocks)
             FROM cutoff
             """, connection, transaction);
         command.Parameters.AddWithValue(demand.TenantId);
@@ -116,6 +115,6 @@ public static class PostgresInventoryReservationBalanceLoader
         }
         return new InventoryReservationBalanceSnapshot(request.EffectiveDate,
             reader.GetFieldValue<DateTimeOffset>(0), InventoryQuantity.Create(reader.GetDecimal(1)),
-            reader.GetDecimal(2), reader.GetDecimal(3), reader.GetDecimal(4), reader.GetDecimal(5));
+            reader.GetDecimal(2), reader.GetDecimal(3), reader.GetDecimal(4), reader.GetDecimal(5), reader.GetDecimal(6));
     }
 }

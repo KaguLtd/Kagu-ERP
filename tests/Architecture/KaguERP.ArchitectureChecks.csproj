@@ -90,6 +90,18 @@
     <Compile Include="..\Integration\DatabaseIntegrationCheck.cs" Link="Database\DatabaseIntegrationCheck.cs" />
     <Compile Include="..\Integration\InventoryDatabaseIntegrationCheck.cs"
              Link="Database\InventoryDatabaseIntegrationCheck.cs" />
+    <Compile Include="..\Integration\InventoryReservationWriterIntegrationCheck.cs"
+             Link="Database\InventoryReservationWriterIntegrationCheck.cs" />
+    <Compile Include="..\Integration\InventoryReservationReleaseIntegrationCheck.cs"
+             Link="Database\InventoryReservationReleaseIntegrationCheck.cs" />
+    <Compile Include="..\Integration\SalesReservationBatchIntegrationCheck.cs"
+             Link="Database\SalesReservationBatchIntegrationCheck.cs" />
+    <Compile Include="..\Integration\SalesStockOrderGatewayIntegrationCheck.cs"
+             Link="Database\SalesStockOrderGatewayIntegrationCheck.cs" />
+    <Compile Include="..\Integration\SalesConfirmationReservationIntegrationCheck.cs"
+             Link="Database\SalesConfirmationReservationIntegrationCheck.cs" />
+    <Compile Include="..\Integration\SalesCancellationReservationIntegrationCheck.cs"
+             Link="Database\SalesCancellationReservationIntegrationCheck.cs" />
     <Compile Include="..\Integration\SalesDatabaseIntegrationCheck.cs"
              Link="Database\SalesDatabaseIntegrationCheck.cs" />
     <Compile Include="..\..\src\Erp.Bootstrap\*.cs"

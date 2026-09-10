@@ -102,10 +102,12 @@ var checks = new (string Name, Action Run)[]
     ("INV-QRY-002 stable movement timeline boundaries", InventoryDomainChecks.MovementQueryBoundariesAreEnforced),
     ("INV-RES-001 reservation demand and quantity lifecycle", InventoryDomainChecks.ReservationLifecyclePreservesDemandAndQuantity),
     ("INV-RES-004 partial reservation capacity", InventoryDomainChecks.PartialReservationPreservesDemand),
+    ("INV-CNT-001 negative book count difference", InventoryCountDifferenceChecks.CountDifferencePreservesNegativeBookBalance),
     ("INV-RES-002 reservation permission and warehouse scope", InventoryDomainChecks.ReservationAuthorizationRequiresWarehouseScope),
     ("SALES-ORD-001/FUL-001 versioned order and fulfilment evidence", SalesDomainChecks.OrderLifecycleIsAppendOnlyAndVersioned),
     ("SALES-DSP-001 dispatch preparation remaining quantity", SalesDomainChecks.DispatchPreparationPreservesRemainingQuantity),
     ("SALES-ORD-002 command authorization and persistence boundary", SalesDomainChecks.OrderCommandsEnforcePermissionAndPersistenceBoundary),
+    ("SALES-RES-005 stock-order immutable application selections", SalesDomainChecks.StockOrderCommandsSnapshotAndValidateSelections),
 };
 
 static void ReconciliationTransitJournalsAreExact()

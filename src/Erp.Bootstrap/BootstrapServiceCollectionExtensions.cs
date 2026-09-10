@@ -21,6 +21,10 @@ public static class BootstrapServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
+        // MP-04 runtime SQL/RLS/concurrency gate is not yet evidenced. No configuration switch
+        // may silently enable the compound writer or fall back to a lifecycle-only transition.
+        services.TryAddScoped<ISalesStockOrderGateway, UnavailableSalesStockOrderGateway>();
+
         string? connectionString = configuration["KAGU_ERP_APP_CONNECTION_STRING"];
         if (string.IsNullOrWhiteSpace(connectionString))
         {

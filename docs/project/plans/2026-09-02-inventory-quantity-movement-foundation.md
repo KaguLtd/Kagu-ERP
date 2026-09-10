@@ -102,6 +102,14 @@
 
 ## Tamamlanma kanıtı
 
+9 Eylül 2026 bağlantılı ilerleme: `INV-CAP-001/002` ile immediate transfer yazıcısına ortak
+position-kilitli rezervasyon/bloke kapasite koruması, kilit bekleme sonrası depo kapsamı yenilemesi,
+ortak aktif stock/untracked master ve miktar ölçeği denetimi eklendi. Her yeni transfer çiftinde
+kapasite/ikinci INSERT hatası iki bacağı da geri alır; immutable replay yeni post sayılmaz.
+Negatif stok istisnası ve backdate izni seçilmedi; public gateway açılmadı. Geniş DB senaryoları ve
+doğrulama kaydı [rezervasyon planında](2026-09-05-inventory-reservation-lifecycle-foundation.md)
+tutulur; runtime MP-04 toplu kapısındadır. Bu oturum commit/push yapılmadı.
+
 - [ ] Domain kabul kriterleri ve dar testler.
 - [x] Mimari sınır ve derleme.
 - [x] Belgeler ve master etkisi.

@@ -43,29 +43,39 @@ public static class PostgresImmediateStockTransferWriter
             [new(issue.ItemId, issue.WarehouseId, issue.BaseUom),
              new(receipt.ItemId, receipt.WarehouseId, receipt.BaseUom)], cancellationToken);
 
-        await ExecuteTransactionCommandAsync(connection, transaction, $"SAVEPOINT {SavepointName}", cancellationToken);
-        bool issueCreated = await TryInsertAsync(connection, transaction, scope, issue, cancellationToken);
-        bool receiptCreated = await TryInsertAsync(connection, transaction, scope, receipt, cancellationToken);
-        if (issueCreated && receiptCreated)
-        {
-            await ExecuteTransactionCommandAsync(
-                connection,
-                transaction,
-                $"RELEASE SAVEPOINT {SavepointName}",
-                cancellationToken);
-            return new ImmediateStockTransferPersistenceResult(transfer.TransferId, true);
-        }
+        // Scope assignments can expire while waiting for a competing stock writer.
+        currentWarehouseScope = await PostgresInventoryWarehouseScopeLoader.LoadAsync(
+            connection, transaction, scope, issue.CompanyId, cancellationToken);
+        _ = AuthorizedImmediateStockTransferCandidate.Create(scope, currentWarehouseScope, transfer);
 
-        await ExecuteTransactionCommandAsync(
-            connection,
-            transaction,
-            $"ROLLBACK TO SAVEPOINT {SavepointName}",
-            cancellationToken);
-        await ExecuteTransactionCommandAsync(
-            connection,
-            transaction,
-            $"RELEASE SAVEPOINT {SavepointName}",
-            cancellationToken);
+        await ExecuteTransactionCommandAsync(connection, transaction, $"SAVEPOINT {SavepointName}", cancellationToken);
+        try
+        {
+            bool issueCreated = await TryInsertAsync(connection, transaction, scope, issue, cancellationToken);
+            bool receiptCreated = await TryInsertAsync(connection, transaction, scope, receipt, cancellationToken);
+            if (issueCreated && receiptCreated)
+            {
+                _ = await PostgresInventoryStockMasterLoader.EnsureAsync(connection, transaction, scope,
+                    issue.CompanyId, issue.ItemId, issue.BaseUom, [issue.WarehouseId, receipt.WarehouseId],
+                    receipt.BaseQuantity, cancellationToken);
+                var capacity = await PostgresInventoryPositionCapacityLoader.LoadAsync(connection, transaction,
+                    scope, issue.CompanyId, new(issue.ItemId, issue.WarehouseId, issue.BaseUom),
+                    issue.EffectiveDate, cancellationToken);
+                if (capacity.HasProtectedDeficit)
+                    throw new InventoryProtectedStockConflictException();
+                await transaction.ReleaseAsync(SavepointName, cancellationToken);
+                return new ImmediateStockTransferPersistenceResult(transfer.TransferId, true);
+            }
+            // A replay is checked against original immutable content, not today's free capacity.
+            await transaction.RollbackAsync(SavepointName, cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(SavepointName, CancellationToken.None);
+            await transaction.ReleaseAsync(SavepointName, CancellationToken.None);
+            throw;
+        }
+        await transaction.ReleaseAsync(SavepointName, cancellationToken);
 
         StockMovementDraft? existingIssue = await LoadCanonicalMovementAsync(
             connection, transaction, issue, cancellationToken);

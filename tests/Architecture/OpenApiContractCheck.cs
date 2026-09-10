@@ -85,6 +85,22 @@ internal static class OpenApiContractCheck
             "Sales order quantities must remain decimal strings at the HTTP boundary.");
 
         AssertGeneratedClients(repositoryRoot);
+
+        JsonElement stockLine = schemas.GetProperty("SalesOrderReservationLineApiRequest").GetProperty("properties");
+        Assert(stockLine.GetProperty("requestedBaseQuantity").GetProperty("type").GetString() == "string",
+            "Stock reservation input quantity must be a decimal string.");
+        JsonElement stockResult = schemas.GetProperty("SalesOrderReservationApiResponse").GetProperty("properties");
+        Assert(stockResult.GetProperty("reservedBaseQuantity").GetProperty("type").GetString() == "string" &&
+               stockResult.GetProperty("requestedBaseQuantity").GetProperty("type").GetString() == "string",
+            "Stock reservation result quantities must be decimal strings.");
+        JsonElement releaseResult = schemas.GetProperty("SalesOrderReleaseApiResponse").GetProperty("properties");
+        Assert(releaseResult.GetProperty("releasedBaseQuantity").GetProperty("type").GetString() == "string" &&
+               releaseResult.GetProperty("consumedBaseQuantity").GetProperty("type").GetString() == "string",
+            "Reservation release quantities must be decimal strings.");
+        var transitionProperties = schemas.GetProperty("SalesOrderTransitionApiRequest").GetProperty("properties");
+        Assert(transitionProperties.TryGetProperty("effectiveDate", out _) &&
+               transitionProperties.TryGetProperty("reservationLines", out _),
+            "Generated transition input lacks the compound stock-order fields.");
     }
 
     private static void AssertGeneratedClients(DirectoryInfo repositoryRoot)

@@ -13,6 +13,7 @@ internal static partial class DatabaseIntegrationCheck
 {
     private static async Task AssertSalesOrderLifecycleFoundationAsync(
         NpgsqlDataSource appDataSource,
+        NpgsqlDataSource ownerDataSource,
         Guid tenantId,
         Guid companyId,
         Guid otherCompanyId,
@@ -231,6 +232,10 @@ internal static partial class DatabaseIntegrationCheck
         }
 
         await AssertSalesAppendOnlyPrivilegesAsync(appDataSource, tenantId, companyId, orderId);
+        await AssertSalesReservationCompositionAsync(ownerDataSource, tenantId, companyId, makerId,
+            orderId, commitment.Lines[0].OrderLineId);
+        await AssertSalesReservationBatchAsync(ownerDataSource, tenantId, companyId, makerId, approverId, itemId);
+        await AssertSalesStockOrderGatewayAsync(ownerDataSource, appDataSource, tenantId, companyId, makerId, approverId, itemId);
     }
 
     private static ExecutionScope SalesScope(

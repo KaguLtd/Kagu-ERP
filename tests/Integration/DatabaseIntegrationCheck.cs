@@ -201,7 +201,7 @@ internal static partial class DatabaseIntegrationCheck
             Guid inventoryItemId = await AssertInventoryQuantityMovementFoundationAsync(
                 migratorDataSource, appDataSource, tenantA, companyA1, companyA2, actorId);
             await AssertSalesOrderLifecycleFoundationAsync(
-                appDataSource, tenantA, companyA1, companyA2, actorId, inventoryItemId);
+                appDataSource, migratorDataSource, tenantA, companyA1, companyA2, actorId, inventoryItemId);
             await AssertJournalReservationAuditOutboxAtomicityAsync(
                 migratorDataSource,
                 appDataSource,

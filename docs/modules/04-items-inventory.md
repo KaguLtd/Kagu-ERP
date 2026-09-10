@@ -19,6 +19,13 @@
 
 ## 3. Miktar anlamları
 
+- `INV-BLK-001`: `stock_block_event` bir bloke kimliği için pozitif ilk miktar ve ardışık
+  sürümlerde yalnız azalan kalan miktar taşır. Depo/ürün/UOM kimliği değişmez; sıfıra inen bloke
+  tekrar açılamaz. Yeni bloke ayrı kimliktir. Her olay gerekçe, actor/correlation, effective date
+  ve recorded timestamp taşır. Sorgu seçili effective/recorded kesitte her bloke için son sürümü
+  toplar; gelecekteki release bugünkü miktarı azaltmaz. `0049` runtime SELECT-only'dir; kullanıcı
+  block/release komutları ve position-lock writer henüz açılmamıştır.
+
 ```text
 on_hand    = posted giriş - posted çıkış
 reserved   = aktif rezervasyon toplamı
@@ -44,12 +51,70 @@ Her movement source belge/satır, warehouse/bin, quantity/UOM/base quantity, lot
 
 ## 5. Negatif stok
 
-- Varsayılan hard block.
-- Şirket politikası izin verirse yalnız belirli item/warehouse, permission, reason ve onay.
-- Negatif hareket `cost_pending` olabilir; düzeltme worker'ı ayrı adjustment üretir, eski movement'i değiştirmez.
+- 10 Eylül 2026 kullanıcı kararı: eksi stok miktarına izin verilir; eksiye düşmek tek başına sevk/çıkış ret nedeni değildir. Olağan işlem yetkisi, tenant/company/depo kapsamı ve audit korunur. Yalnız eksi stok için ek yönetici onayı varsayılmaz.
+- Elde olmayan miktar pozitif rezervasyon olarak yaratılmaz; kısmi rezervasyon kuralı korunur. Sevk ile reservation ayrımı DEC-MP01-011/025 güncellemesindedir.
+- Eksiye çıkan sevkte **son bilinen maliyet** kullanılır (10 Eylül 2026 kullanıcı onayı). Hiç bilinen maliyeti olmayan ürün ve sonraki girişle maliyet farkı uzlaştırması ayrıca netleştirilecektir; sıfır maliyet veya eski movement/GL güncellemesi varsayılmaz.
 - Kapanış negatif stok varken bloklanabilir; rapor zorunlu.
 
 ## 6. Rezervasyon
+
+- `INV-RES-014`: Source reservation discovery Inventory tablosunun sahibindedir. Trusted
+  tenant/company + source type/id ve release permission ile current head'leri döndürür;
+  farklı şirketin source UUID'si verilmesi veri döndürmez. Caller iptal öncesi üretici kaynağı
+  kilitlemelidir; loader tek başına kaynağı iptal etmez veya yazma izni üretmez. Sonuç kümesindeki
+  bütün depolar actor scope'unda olmalıdır. İlk atomik iptal dilimi 500 reservation head ile
+  sınırlıdır; 501'inci kayıtta typed limit exception döner. Bu sınır production kabulünden önce
+  yüksek geçmiş hacmi/concurrency senaryolarında gözden geçirilecektir. Reserved/consumed history
+  silinmez; release writer son sürümü domain üzerinden tekrar doğrular.
+
+- `INV-RES-012`: Internal manuel release, `inventory.reservation.release` permission'ı,
+  şirket ve actor-bound depo kapsamı, exact expected version, correlation, effective date ve
+  1–1000 karakter normalize gerekçe ister. Immutable creation'dan source/pozisyon bulunur;
+  demand→position kilitlerinden sonra depo yetkisi yeniden doğrulanır. History domain lifecycle
+  üzerinden yeniden kurulur; version, effective/occurred sırası ve consumed/remaining miktarları
+  doğrulanır. Yeni release yalnız kalanı sıfırlar; tüketilen miktarı ve kaynak stok/GL kayıtlarını
+  değiştirmez. Aynı correlation exact içerikte eski event/time/miktarı döndürür; farklı içerik,
+  eski sürüm, terminal state veya önceki olaya göre geri effective tarih reddedilir. Recorded ve
+  occurred timestamp yeni olayda DB saatinden alınır. Bu tarih kontrolü mali dönem/backdate
+  posting izni değildir. Pasif ürün/depo için release yeni stok hareketi olmadığı için master
+  aktifliği aranmaz; güncel depo kapsamı zorunludur.
+
+- `INV-RES-013`: Internal release/audit orchestration ve 1–500 tekil rezervasyon batch'i
+  aynı transaction/savepoint'tedir. Batch tek trusted actor/company ister; tüm demand kilitleri,
+  ardından tüm pozisyon kilitleri yazmadan önce alınır. Bir satır veya audit hatası önceki batch
+  release/audit kayıtlarını da geri alır; cevap girdi sırasındadır. Runtime lifecycle INSERT ve
+  API hâlâ kapalıdır. Bu manuel batch kaynak siparişi iptal etmez; otomatik sipariş iptali ayrıca
+  tüm kalan rezervasyonların keşfi ve Sales transition ile atomik bağlanmalıdır. Reason audit
+  loguna kopyalanmaz; yalnız scope'lu lifecycle kaydında tutulur. Yeni izin kodu runtime kullanıcı
+  şablonlarına veya DB rolüne bu dilimde grant edilmez.
+
+- `INV-CAP-001`: Internal kapasite koruması, kilitlenmiş tenant/company/item/warehouse/UOM
+  pozisyonunda işlem tarihinden sonraki kayıtlı stok, lifecycle ve bloke değişim tarihlerinin
+  tamamında `on-hand − active reserved − blocked` hesaplar. Yeni rezervasyon bu serinin minimum
+  kullanılabilir miktarıyla sınırlıdır; sonraki mal girişi aradaki açığı gizleyemez. Rapor cutoff'u
+  yazma güvenliğine uygulanmaz: DB'ye zaten yazılmış ileri effective/recorded tarihli kayıtlar da
+  dikkate alınır. Reservation creation mevcut loader sözleşmesiyle uyumlu olarak oluşturulduğu
+  andan itibaren konservatif tutulur; effective lifecycle release tarihinden önce serbest sayılmaz.
+  Bu teknik projeksiyon tarihli rapor değildir; backdate veya kapalı döneme yazma izni üretmez.
+
+- `INV-CAP-002`: Immediate-transfer yazıcısı iki pozisyon kilidinden sonra depo kapsamını yeniden
+  doğrular. Yalnız yeni çift için aktif stock/untracked ürün, şirket aktivasyonu, iki depo ve
+  miktar ölçeği ortak FOR SHARE master yükleyicisinden geçirilir. Çıkış pozisyonunda herhangi bir
+  etkili kesitte rezervasyon/bloke stoğun fiziksel karşılığı kalmıyorsa iki bacak savepoint ile
+  geri alınır. İkinci INSERT SQL hatası da ilk bacağı temizler ve caller transaction kullanılabilir
+  kalır. Replay güncel serbest kapasite/master aktifliğiyle tekrar post edilmez; güncel yetki ve
+  orijinal immutable içerikle değerlendirilir. Rezervasyon/bloke bulunmayan generic negatif stok
+  fixture davranışı bu korumanın konusu değildir; DEC-MP01-011 ve runtime kapısı açık kalır.
+
+- `INV-RES-011`: Internal create writer request kilidi ve immutable replay sonrasında aynı
+  transaction'a bağlı Sales published demand'i yükler. Demand/position kilitleri altında
+  `min(istenen, max(0, talep − consumed − active), max(0, INV-CAP-001 minimum kapasitesi))`
+  miktarını ayırır. Aktif stock/untracked ürün, şirket aktivasyonu, depo ve exact miktar ölçeği
+  FOR SHARE ile korunur. Pozitif creation ve request-result veya yalnız sıfır-result atomik yazılır;
+  hata savepoint'i geri alır. Bootstrap composition kaynağı aynı transaction'a bağlar ve audit'i
+  aynı atomik birime katar. Runtime INSERT ve API kapalıdır: tarih/politika kapısı, yeni stok
+  azaltan yolların protokole katılımı ve MP-04 runtime kanıtı tamamlanmadan devreye alınmaz.
+  Otomatik expiry ve GL etkisi yoktur.
 
 - `INV-RES-010`: `0048` consume/release olayları append-only ve ardışık sürümlüdür. Consumption
   kalanı aşamaz; release tüketileni korur ve yalnız aktif kalanı sıfırlar. Terminal olaydan sonra
@@ -61,8 +126,9 @@ Her movement source belge/satır, warehouse/bin, quantity/UOM/base quantity, lot
 - `INV-RES-009`: Internal reservation balance loader exact request/demand eşleşmesinden sonra
   source type/id/line için version ve depodan bağımsız demand lock, ardından stok position lock
   alır. Seçili effective date ve DB recorded cutoff ile on-hand; pozisyondaki ve talepteki brüt
-  creation toplamlarını döndürür. Yetki bekleme sonrası yeniden yüklenir. Bu sonuç lifecycle
-  düşümleri ve blocked miktar kaynağı bağlanana kadar available sayılmaz; dış API'ye yayımlanmaz.
+  creation toplamlarını, son effective lifecycle üzerinden active/consumed talep miktarını ve
+  blocked toplamını döndürür. Yetki bekleme sonrası yeniden yüklenir. Bu tarih kesitli iç okuma,
+  yazma anında ileri tarihli açığı önleyen INV-CAP-001 denetiminin yerine geçmez; dış API'ye yayımlanmaz.
 
 - `INV-RES-008`: Reservation request gate exact tenant/company/request için transaction advisory
   lock alır; actor/depo/fingerprint lock anahtarını bölmez. ReadCommitted zorunludur. Kilit öncesi
@@ -153,7 +219,7 @@ Kesinleşmiş tek adımlı transfer yerinde değiştirilmez. Düzeltme, ters yö
 
 ## 9. Maliyet
 
-MVP varsayılanı **hareketli ağırlıklı ortalama**; şirket/item cost profile bazlı. FIFO Faz 2 kararı olabilir.
+MVP yöntemi **hareketli ağırlıklı ortalama**; 10 Eylül 2026 kullanıcı onaylıdır. Şirket/item cost profile bazlı; FIFO Faz 2 kararı olabilir. Eksiye çıkan sevkte son bilinen maliyet kullanılır; maliyet geçmişi olmayan ürün ve sonraki uzlaştırma ayrıntısı açıktır.
 
 - Receipt cost: base fiyat + dağıtılmış landed cost - iskonto + dahil edilebilir masraf.
 - Issue, posting anındaki mevcut average cost snapshot'ı.
@@ -169,7 +235,7 @@ MVP varsayılanı **hareketli ağırlıklı ortalama**; şirket/item cost profil
 - Blind count opsiyonu; kullanıcı beklenen miktarı görmez.
 - Aynı item/bin/lot için ikinci sayım gerektiğinde policy.
 - Snapshot sonrası hareketler ayrı tutulur ve as-of fark hesaplanır.
-- Fark threshold'a göre depo + muhasebe onayı.
+- 10 Eylül kullanıcı kararı: yönetici ve sayım farkı fişi işleme yetkisi verilen kullanıcı fiş işleyebilir. Her fiş için otomatik ikinci kişi/depo+muhasebe onayı şartı yoktur; varsa ayrıca tanımlanan onay politikası uygulanır.
 - Posted fark ayrı stock movement ve journal; count line update edilmez.
 
 ## 11. API
@@ -251,8 +317,13 @@ Landed cost navlun, sigorta ve benzeri adjustment’ı açık allocation basis i
 - CountPlan location/risk/frequency, assignee, cutoff watermark ve kör sayım seçeneği taşır.
 - Beklenen miktar kör sayım tamamlanmadan gösterilmez.
 - Sayım sırasında gerçekleşen hareketler watermark sonrası listelenir; sistem sessiz snapshot farkı yazmaz.
-- Tolerans aşımı farklı kullanıcıdan recount ve gerekiyorsa onay ister.
+- Tolerans/recount için ayrıca onaylanmış politika varsa uygulanır; kullanıcının yetkili kişiye fiş işleme kararına aykırı zorunlu ikinci kişi şartı kendiliğinden eklenmez.
 - Count sonucu posted adjustment event üretir; on-hand kolonunu doğrudan overwrite etmez.
 - Annual full count ile risk bazlı cycle count takvimi ayrı raporlanır.
 
 Kabul testleri eşzamanlı transfer sırasında sayım, seri/lot cardinality, negatif stok policy, backdated valuation ve recount görevler ayrılığını içerir.
+
+`INV-CNT-001`: Sayım farkı önizlemesi `fiziksel sayım − snapshot kayıt miktarı` olarak exact
+numeric(20,6) hesaplanır. Kayıt miktarı negatif olabilir; fiziksel sayım negatif olamaz. Örneğin
+kayıt -5 ve sayım 2 ise fark +7'dir. Bu nesne yalnız miktar önizlemesidir; yetki, authoritative
+snapshot, watermark sonrası hareket uzlaştırması, maliyet, fiş veya GL posting sonucu değildir.

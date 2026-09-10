@@ -7,9 +7,14 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
+    <ProjectReference Include="..\Modules\Inventory\Inventory.Infrastructure\KaguERP.Modules.Inventory.Infrastructure.csproj" />
+    <ProjectReference Include="..\Modules\Inventory\Inventory.Application\KaguERP.Modules.Inventory.Application.csproj" />
+    <ProjectReference Include="..\Modules\Inventory\Inventory.Domain\KaguERP.Modules.Inventory.Domain.csproj" />
+    <ProjectReference Include="..\Modules\Sales\Sales.Contracts\KaguERP.Modules.Sales.Contracts.csproj" />
     <ProjectReference Include="..\Modules\Reporting\Reporting.Application\KaguERP.Modules.Reporting.Application.csproj" />
     <ProjectReference Include="..\Modules\Reporting\Reporting.Infrastructure\KaguERP.Modules.Reporting.Infrastructure.csproj" />
     <ProjectReference Include="..\Modules\Sales\Sales.Application\KaguERP.Modules.Sales.Application.csproj" />
+    <ProjectReference Include="..\Modules\Sales\Sales.Domain\KaguERP.Modules.Sales.Domain.csproj" />
     <ProjectReference Include="..\Modules\Sales\Sales.Infrastructure\KaguERP.Modules.Sales.Infrastructure.csproj" />
     <ProjectReference Include="..\Modules\Parties\Parties.Infrastructure\KaguERP.Modules.Parties.Infrastructure.csproj" />
     <ProjectReference Include="..\Modules\Accounting\Accounting.Infrastructure\KaguERP.Modules.Accounting.Infrastructure.csproj" />

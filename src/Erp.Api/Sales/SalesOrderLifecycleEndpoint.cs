@@ -19,7 +19,8 @@ internal sealed record SalesOrderLineCreateApiRequest(
 internal sealed record SalesOrderCreateApiRequest(
     Guid CompanyId,
     IReadOnlyList<SalesOrderLineCreateApiRequest> Lines);
-internal sealed record SalesOrderTransitionApiRequest(Guid CompanyId, string? Reason);
+internal sealed record SalesOrderTransitionApiRequest(Guid CompanyId, string? Reason,
+    DateOnly? EffectiveDate = null, IReadOnlyList<SalesOrderReservationLineApiRequest>? ReservationLines = null);
 internal sealed record SalesOrderTransitionApiResponse(
     Guid EventId,
     string Transition,
@@ -37,7 +38,11 @@ internal sealed record SalesOrderLifecycleApiResponse(
     [property: JsonNumberHandling(JsonNumberHandling.Strict)]
     long Version,
     IReadOnlyList<SalesOrderLineApiResponse> Lines,
-    IReadOnlyList<SalesOrderTransitionApiResponse>? Transitions);
+    IReadOnlyList<SalesOrderTransitionApiResponse>? Transitions)
+{
+    public IReadOnlyList<SalesOrderReservationApiResponse>? Reservations { get; init; }
+    public IReadOnlyList<SalesOrderReleaseApiResponse>? Releases { get; init; }
+}
 internal sealed record SalesOrderLineApiResponse(
     Guid Id,
     Guid ItemId,
@@ -80,7 +85,7 @@ internal static partial class SalesOrderLifecycleEndpoint
             .WithName("TransitionSalesOrder")
             .WithTags("Sales Orders")
             .WithSummary("Apply a sales order lifecycle transition")
-            .WithDescription("Requires a canonical UUID Idempotency-Key and a quoted positive If-Match version.")
+            .WithDescription("Requires a canonical UUID Idempotency-Key and a quoted positive If-Match version. Confirm requires effectiveDate and 1–500 reservationLines; cancel requires effectiveDate and reason, without reservationLines. Confirm/cancel use the atomic stock-order gateway, currently unavailable pending MP-04 verification; no lifecycle-only fallback. Other actions reject stock fields.")
             .Accepts<SalesOrderTransitionApiRequest>("application/json")
             .Produces<SalesOrderLifecycleApiResponse>(StatusCodes.Status200OK)
             .Produces<ApiProblemResponse>(StatusCodes.Status400BadRequest, "application/problem+json")
@@ -105,8 +110,7 @@ internal static partial class SalesOrderLifecycleEndpoint
         version = 0;
         StringValues values = headers[VersionHeader];
         string? value = values.Count == 1 ? values[0] : null;
-        return value is { Length: >= 3 } && value[0] == '"' && value[^1] == '"' &&
-            long.TryParse(value[1..^1], out version) && version > 0;
+        return TryReadExpectedVersion(value, out version);
     }
 
     internal static bool TryResolveTransition(string action, out SalesOrderTransition transition)
@@ -198,7 +202,7 @@ internal static partial class SalesOrderLifecycleEndpoint
         }
     }
 
-    private static async Task TransitionAsync(
+    internal static async Task TransitionAsync(
         HttpContext context,
         Guid orderId,
         string action,
@@ -209,6 +213,7 @@ internal static partial class SalesOrderLifecycleEndpoint
         IRequestAuditContextAccessor auditContextAccessor,
         IAuthorizationAuditWriter auditWriter,
         ISalesOrderLifecycleGateway gateway,
+        ISalesStockOrderGateway stockGateway,
         ILogger<SalesOrderLifecycleLogCategory> logger)
     {
         if (request.CompanyId == Guid.Empty || !TryResolveTransition(action, out SalesOrderTransition transition) ||
@@ -232,10 +237,22 @@ internal static partial class SalesOrderLifecycleEndpoint
                 correlationId,
                 occurredAt,
                 request.Reason);
-            SalesOrderLifecyclePersistenceOutcome outcome = await gateway.TransitionAsync(
-                command, auditContextAccessor.Current, context.RequestAborted);
-            context.Response.Headers.ETag = QuoteVersion(outcome.State.Version);
-            await Results.Ok(CreateResponse(outcome.State, outcome.Commitment)).ExecuteAsync(context);
+            SalesOrderLifecycleApiResponse response;
+            if (transition is SalesOrderTransition.Confirm or SalesOrderTransition.Cancel)
+            {
+                response = await ApplyStockTransitionAsync(command, request, stockGateway,
+                    auditContextAccessor.Current, context.RequestAborted);
+            }
+            else
+            {
+                if (request.EffectiveDate is not null || request.ReservationLines is not null)
+                    throw new SalesOrderStockInputException();
+                SalesOrderLifecyclePersistenceOutcome outcome = await gateway.TransitionAsync(
+                    command, auditContextAccessor.Current, context.RequestAborted);
+                response = CreateResponse(outcome.State, outcome.Commitment);
+            }
+            context.Response.Headers.ETag = QuoteVersion(response.Version);
+            await Results.Ok(response).ExecuteAsync(context);
         }
         catch (Exception exception)
         {
@@ -314,11 +331,15 @@ internal static partial class SalesOrderLifecycleEndpoint
 
         (int status, string code, bool auditDenied) = exception switch
         {
+            SalesOrderStockInputException => (StatusCodes.Status422UnprocessableEntity, "INVALID_SALES_STOCK_ORDER_INPUT", false),
+            SalesStockOrderAccessException denied => (StatusCodes.Status403Forbidden, denied.Code, true),
+            SalesStockOrderUnavailableException unavailable => (StatusCodes.Status503ServiceUnavailable, unavailable.Code, false),
             ExecutionScopeDeniedException => (StatusCodes.Status404NotFound, "SALES_ORDER_NOT_FOUND", true),
             SalesOrderGatewayNotFoundException => (StatusCodes.Status404NotFound, "SALES_ORDER_NOT_FOUND", false),
             SalesOrderAuthorizationException authorization =>
                 (StatusCodes.Status403Forbidden, authorization.Code, true),
-            SalesOrderGatewayConflictException persistence when persistence.Code == "SALES_ORDER_VERSION_CONFLICT" =>
+            SalesOrderGatewayConflictException persistence when persistence.Code is
+                "SALES_ORDER_VERSION_CONFLICT" or "INVENTORY_RESERVATION_VERSION_CONFLICT" =>
                 (StatusCodes.Status412PreconditionFailed, persistence.Code, false),
             SalesOrderGatewayConflictException persistence =>
                 (StatusCodes.Status409Conflict, persistence.Code, false),
@@ -360,7 +381,8 @@ internal static partial class SalesOrderLifecycleEndpoint
     {
         version = 0;
         return value is { Length: >= 3 } && value[0] == '"' && value[^1] == '"' &&
-            long.TryParse(value[1..^1], out version) && version > 0;
+            value[1] is >= '1' and <= '9' &&
+            long.TryParse(value[1..^1], NumberStyles.None, CultureInfo.InvariantCulture, out version) && version > 0;
     }
 
     private static string FormatStatus(SalesOrderStatus status) => status switch

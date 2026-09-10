@@ -4,6 +4,54 @@ using KaguERP.Modules.Sales.Domain.Orders;
 
 internal static class SalesDomainChecks
 {
+    public static void StockOrderCommandsSnapshotAndValidateSelections()
+    {
+        Guid tenant = Guid.NewGuid(), company = Guid.NewGuid(), actor = Guid.NewGuid(), order = Guid.NewGuid();
+        var scope = new ExecutionScope(tenant, actor,
+            [new CompanyAccess(company, ["sales.order.confirm", "sales.order.cancel"])]);
+        var at = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        AuthorizedSalesOrderTransitionCommand Transition(SalesOrderTransition kind, long version = 3, string? reason = null) =>
+            AuthorizedSalesOrderTransitionCommand.Create(scope, company, order, version, kind, Guid.NewGuid(), at, reason);
+        var confirm = Transition(SalesOrderTransition.Confirm);
+        var original = new SalesStockOrderLineSelection(Guid.NewGuid(), Guid.NewGuid(), 3m);
+        var input = new List<SalesStockOrderLineSelection> { original };
+        var command = new SalesStockOrderConfirmationCommand(confirm, new(2026, 9, 10), input);
+        input[0] = original with { Quantity = 8m };
+        input.Clear();
+        Equal(original, command.Lines[0], "Caller mutation changed the authorized stock selection.");
+        Equal(1, command.Lines.Count, "Caller mutation changed the selection count.");
+        Reject(() => _ = new SalesStockOrderConfirmationCommand(confirm, command.EffectiveDate, []));
+        Reject(() => _ = new SalesStockOrderConfirmationCommand(confirm, command.EffectiveDate, [original, original]));
+        Reject(() => _ = new SalesStockOrderConfirmationCommand(confirm, command.EffectiveDate, [original with { WarehouseId = Guid.Empty }]));
+        Reject(() => _ = new SalesStockOrderConfirmationCommand(confirm, command.EffectiveDate, [original with { OrderLineId = Guid.Empty }]));
+        Reject(() => _ = new SalesStockOrderConfirmationCommand(confirm, command.EffectiveDate, [null!]));
+        var maximum = Enumerable.Range(0, 500).Select(_ => original with { OrderLineId = Guid.NewGuid() }).ToArray();
+        Equal(500, new SalesStockOrderConfirmationCommand(confirm, command.EffectiveDate, maximum).Lines.Count,
+            "The supported maximum selection size was rejected.");
+        Reject(() => _ = new SalesStockOrderConfirmationCommand(confirm, command.EffectiveDate, [.. maximum, original]));
+        Reject(() => _ = new SalesStockOrderConfirmationCommand(Transition(SalesOrderTransition.Confirm, long.MaxValue),
+            command.EffectiveDate, [original]));
+        Expect("SALES_ORDER_QUANTITY_INVALID", () => _ = new SalesStockOrderConfirmationCommand(confirm,
+            command.EffectiveDate, [original with { Quantity = 0m }]));
+        Expect("SALES_ORDER_QUANTITY_INVALID", () => _ = new SalesStockOrderConfirmationCommand(confirm,
+            command.EffectiveDate, [original with { Quantity = 0.0000001m }]));
+        Reject(() => _ = new SalesStockOrderCancellationCommand(confirm, command.EffectiveDate));
+        Reject(() => _ = new SalesStockOrderCancellationCommand(Transition(SalesOrderTransition.Cancel, reason: "  "), command.EffectiveDate));
+        Reject(() => _ = new SalesStockOrderCancellationCommand(Transition(SalesOrderTransition.Cancel, reason: new string('x', 1001)), command.EffectiveDate));
+        Reject(() => _ = new SalesStockOrderCancellationCommand(Transition(SalesOrderTransition.Cancel, reason: new string('x', 501)), command.EffectiveDate));
+        _ = new SalesStockOrderCancellationCommand(Transition(SalesOrderTransition.Cancel, reason: new string('x', 500)), command.EffectiveDate);
+        var cancel = Transition(SalesOrderTransition.Cancel, reason: "A cancellation reason");
+        _ = new SalesStockOrderCancellationCommand(cancel, command.EffectiveDate);
+        Reject(() => _ = new SalesStockOrderConfirmationCommand(cancel, command.EffectiveDate, [original]));
+
+        static void Reject(Action action)
+        {
+            try { action(); }
+            catch (ArgumentException) { return; }
+            throw new InvalidOperationException("Invalid stock-order input was accepted.");
+        }
+    }
+
     public static void OrderLifecycleIsAppendOnlyAndVersioned()
     {
         Guid makerId = Guid.NewGuid();

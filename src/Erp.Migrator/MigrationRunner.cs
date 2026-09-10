@@ -57,6 +57,8 @@ internal sealed class MigrationRunner(string connectionString)
         new("0046_inventory_reservation_creation", "0046_inventory_reservation_creation.sql"),
         new("0047_inventory_reservation_request_result", "0047_inventory_reservation_request_result.sql"),
         new("0048_inventory_reservation_lifecycle", "0048_inventory_reservation_lifecycle.sql"),
+        new("0049_inventory_stock_block", "0049_inventory_stock_block.sql"),
+        new("0050_sales_stock_cancellation_receipt", "0050_sales_stock_cancellation_receipt.sql"),
     ];
 
     public async Task<int> RunAsync(CancellationToken cancellationToken)

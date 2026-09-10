@@ -50,7 +50,7 @@ Secret, credential, gerçek kişisel veri, tam VKN/IBAN veya hassas kurum cevab�
 | DEC-MP01-008 | Posting rule, manual journal, reversal/correction ve repost onay politikası | Muhasebe + güvenlik | approved | Production mali müşavir kabulü | Kaynak belge, direct journal ve reversal ayrımı |
 | DEC-MP01-009 | Cari vade, taksit, allocation/unallocation, avans/fazla ödeme ve write-off | Muhasebe + ürün | approved | Production mali müşavir kabulü | Peşin default, oldest-due, unapplied credit ve aging policy |
 | DEC-MP01-010 | Banka/tahsilat/payment ile reconciliation tetikleyicileri ve transit hesaplar | Muhasebe + finans | approved | Production hesap eşlemesi/banka kabulü | `DEC-MP01-022` ayrıntısındaki posted payment + transit reconciliation |
-| DEC-MP01-011 | Stok değerleme, eksi stok, backdate/repost ve sayım politikası | Muhasebe + ürün | open | MP-04 stok/satış | Generic quantity invariants ve impact-preview contract |
+| DEC-MP01-011 | Stok değerleme, eksi stok, backdate/repost ve sayım politikası | Muhasebe + ürün | evidence-received | Negatif stok maliyet uzlaştırması ve backdate/reopen ayrıntısı | Hareketli ortalama, eksi miktara izin ve yetkili sayım farkı hazırlığı |
 | DEC-MP01-012 | Rol kataloğu, permission/scope, SoD, quorum, limit ve delegation | Ürün + güvenlik | approved | Production access review ve isimli güvenlik sahibi | Granüler permission + altı kopyalanabilir şablon; SoD korunur |
 | DEC-MP01-013 | KDV/tax point/beyan/düzeltme kural sahibi ve resmi yayın süreci | Muhasebe + hukuk | open | TAX/EINV feature ve production | Tarih etkili rule engine/adapter iskeleti; gerçek oran yok |
 | DEC-MP01-014 | e-Fatura portal/doğrudan entegrasyon, numara, imza, retry, iptal ve arşiv | Ürün + muhasebe + operasyon | open | EINV production | Fake/portal adapter contract; gerçek gönderim kapalı |
@@ -67,6 +67,30 @@ Secret, credential, gerçek kişisel veri, tam VKN/IBAN veya hassas kurum cevab�
 | DEC-MP01-025 | Depo seçimi, kısmi rezervasyon ve süre sonu | Kullanıcı + teknik | approved | Değerleme/backdate ve production kabulü ayrı | Seçilen depo, mevcut miktar kadar rezervasyon, otomatik expiry yok |
 
 ### DEC-MP01-025 — Rezervasyon davranışı
+
+Güncelleme 10 Eylül 2026: Kullanıcı sevkte eksi stok oluşmasına açıkça izin verdi. Aşağıdaki tarihsel
+kararın "elde olmayan miktar ... sevk edilmez" bölümü DEC-MP01-011 ile superseded'dır. Elde olmayan
+miktarın rezervasyon olarak yaratılmaması, kısmi rezervasyon ve expiry/release kuralları korunur.
+
+### DEC-MP01-011 — 10 Eylül 2026 kullanıcı kararı
+
+- **Onaylandı:** Hareketli ağırlıklı ortalama maliyet. Eksi stok miktarına izin verilir; sayım/kayıt
+  hatası nedeniyle işlem otomatik engellenmez. Yönetici veya sayım farkı fişi işleme yetkisi verilen
+  kullanıcı fiş işleyebilir; her fişe zorunlu ikinci kişi onayı önerisi kullanıcı tarafından benimsenmedi.
+- **Düzeltme yetkisi:** Kesinleşmiş kaydın düzeltmesi yalnız yöneticiye aittir. Uygulama yorumu:
+  orijinal kesinleşmiş kayıt/audit korunarak ters kayıt ve karşı belge üzerinden düzeltme; doğrudan
+  UPDATE/DELETE veya geçmişi silme aracı yapılmaz. Bu yorum kullanıcıya açıkça bildirildi.
+- **Son maliyet onayı:** Kullanıcı sonraki cevabında "Maliyet son bilinen maliyeti kullanarak olacak"
+  dedi. Eksiye çıkan stok sevkinde son bilinen maliyet kullanılacaktır; bu tercih artık açık değildir.
+- **Hâlâ açık:** Hiç bilinen maliyeti olmayan ürünün başlangıç maliyeti ve sonraki girişle farkın
+  uzlaştırılma ayrıntısı. Son maliyet onayı sıfır maliyet veya sessiz geçmiş GL değişikliği onayı değildir.
+  Açık/kapalı dönem backdate/reopen ayrıntısı önceki cevaptan türetilmez.
+- **Sınır:** Yetkilendirme, depo/company scope, audit, immutable geçmiş ve sayım snapshot/cutoff
+  korunur. Mevcut rezervasyon/bloke koruması, eksi stok adına körlemesine kaldırılmaz; negatif stok
+  yazma davranışı tüm ilgili writer'larda tutarlı tasarlanıp MP-04 kapısında doğrulanacaktır.
+- **Kanıt:** Bu görevde kullanıcının dört maddelik cevabı; yeni politika gizlice uygulanmış sayılmaz.
+
+### DEC-MP01-025 — Tarihsel onay kaydı
 
 ```yaml
 decision_id: DEC-MP01-025

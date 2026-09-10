@@ -24,6 +24,45 @@ Teklif, satış siparişi, stok rezervasyonu, sevk/irsaliye, fatura, iade ve ilg
 
 ## 4. Sipariş
 
+- `SALES-RES-004`: Internal cancellation composition, mevcut `sales.order.cancel` ve
+  `inventory.reservation.release` yetkilerini birlikte ister; scope'u genişletmez veya rol grant'i
+  yapmaz. Sales lifecycle'in izin verdiği iptal geçişi, kaynak rezervasyonlarının Inventory-owned
+  keşfi, aktif kalanların batch release'i ve audit aynı transaction/savepoint'tedir. Yeni iptalde
+  Sales satırının exclusive kilidi keşiften önce alınır; confirmed-demand okuması üzerinden yeni
+  rezervasyon bu aralığa giremez. Manuel release ile sürüm yarışı bütün işlemi geri alır; satır
+  atlayarak kısmi iptal yapılmaz. Önceden manuel release edilmiş/tüketilmiş terminal kayıtlar yeniden
+  release edilmez; stok ve GL terslenmez. İptal correlation + reservation ID'den türeyen sabit
+  release correlation'ı replay'de ilk release sonuçlarını korur. Legacy iptalde aktif rezervasyon
+  kalmışsa replay bunu sonradan onarmaz; explicit conflict verir. Sıfır rezervasyonlu iptal boş
+  release listesi üretir. Kaynak kümesinin tüm depo kapsamı gerekir; 500 üzeri reservation geçmişi
+  bu ilk bounded uygulamada explicit limit hatasıyla kapalıdır, sessiz truncation yoktur.
+  HTTP routing compound gateway'e bağlandı ancak unavailable registration ve SQL grant kapısı nedeniyle yazım açılmadı; otomatik source discovery istemciden gelen
+  reservation ID listesine güvenmez. Mevcut kısmi sevk/finansal düzeltme kuralları değiştirilmez.
+
+- `SALES-RES-003`: Internal stock-only confirmation orchestration, `Confirm` lifecycle
+  geçişi, siparişin tüm satırlarına ait miktar rezervasyon sonuçları ve iki modülün audit kayıtlarını
+  tek savepoint/transaction'da tutar. Tek bir satır eksikse veya reservation/audit başarısızsa
+  confirmed header ve transition olayı da geri alınır. Önce bütün request gate'leri alınır,
+  sonra Sales row update ve batch demand/position kilitleri gelir; böylece batch ile ters kilit
+  sırası kurulmaz. Satır request kimliği confirmation correlation + order-line üzerinden
+  sürümlü SHA-256/UUIDv8 eşlemesidir; quantity/depo/date fingerprint'i aynı confirmation retry'ında
+  değiştirilemez. Salt lifecycle yoluyla önceden confirm edilmiş, reservation sonuçları eksik
+  bir çağrı bu yoldan sonradan doldurulmaz; explicit conflict döner. Kısmi/sıfır stok sonucu
+  confirmation'ı engellemez; kaynak satır açık miktarı stok hareketinden ayrı kalır. Bu yol
+  mevcut HTTP confirm endpoint'ine bağlandı ancak unavailable registration korunur; runtime INSERT izni, iptal/release zinciri
+  ve toplu kanıt kapısı açılmadan kullanıcıya sunulmaz. Sevk, maliyet veya GL posting üretmez.
+
+- `SALES-RES-002`: Internal tek-sipariş reservation batch, aynı tenant/company/actor, exact
+  confirmed order version ve effective date için 1–500 farklı satır/istek alır. Her satırın mevcut
+  istek kimliği idempotency sınırıdır; ayrıca batch kimliği oluşturulmaz. Bütün request gate'ler
+  istek kimliği sırasıyla, pending satırların bütün demand kilitleri hash sırasıyla, ardından bütün
+  position kilitleri hash sırasıyla alınır. Tek-satır writer'ı rastgele döngüyle çağırmak yerine bu
+  paket kullanılmalıdır. Published producer aynı transaction'dadır. Bir satır veya audit hatası
+  paketin önceki creation/result/audit kayıtlarını da geri alır; sonuçlar caller satır sırasıyla
+  döner. Salt replay paketi eski sonuçları döndürmek için güncel confirmed snapshot istemez,
+  fakat güncel permission/warehouse scope denetimini korur. Henüz confirm HTTP komutuna bağlı
+  değildir; kaynak siparişi tek başına confirm etmez veya tarih/posting politikası izni üretmez.
+
 - `SALES-ORD-001`: Sipariş lifecycle geçişi exact expected version, actor, UTC occurrence ve correlation olmadan uygulanamaz; her geçiş previous/new state ve version taşıyan append-only olay üretir.
 - `SALES-ORD-002`: Sipariş commitment'tır; confirm tek başına stok hareketi, gelir, cari açık kalem veya GL kaydı üretmez.
 - `SALES-ORD-002A`: İlk taslak 1–500 authoritative satırla atomik oluşturulur. Her satır immutable
@@ -229,7 +268,38 @@ OrderLine, DispatchLine, Receipt/acceptance kanıtı ve InvoiceLine arasında So
 - link miktar, UOM dönüşümü, net/tax/charge payı ve reversal bağlantısını taşır;
 - ordered/fulfilled/invoiced/returned remaining değerleri link event’lerinden türetilir.
 
+### Stock-only application sınırı — `SALES-RES-005`
+
+`SALES-RES-007`: Compound cancellation, sıfır release dahil etkin tarihi Sales-owned immutable
+`stock_order_cancellation_receipt` içinde aynı transaction'da saklar. Receipt yalnız scope/order/correlation
+ile eşleşen cancellation event'e bağlanır; farklı transition kabul edilmez. Aynı anahtar farklı date
+veya receipt'siz legacy cancellation `SALES_CANCEL_RECEIPT_CONFLICT` üretir; geçmişe tahmini tarih
+backfill edilmez. Receipt audit/release hatasında rollback olur, UPDATE/DELETE ile değiştirilemez.
+Bu kayıt stok veya GL hareketi değildir. `0050` expand migration runtime SELECT-only ve forced RLS kalır.
+
+`ISalesStockOrderGateway` confirm ve cancel için transaction sahibi composition-root uygulamasına
+bağlanabilen Sales-owned sözleşmedir. HTTP routing bu sözleşmeyi çağırır; DI yalnız unavailable
+implementation kaydeder, runtime açılışı değildir.
+Confirm girdisi 1–500 benzersiz sipariş satırı, her satır için tek depo ve pozitif exact numeric(20,6)
+miktar taşır. Girdi koleksiyonu kopyalanır; sonradan istemci/caller mutasyonu uygulanmakta olan komutu
+değiştiremez. Tenant/actor trusted scope'tan, item/UOM persisted commitment'tan, kaynak sürümü
+expected order version + 1'den, reservation request ID confirmation correlation + line ID'den gelir.
+İstemci bunları bağımsız alanlarla belirleyemez. Siparişin bütün satırları tam bir kez seçilmiş olmalıdır.
+
+Gateway aynı ReadCommitted transaction'da order, reservation/result veya release ve audit'i tamamlar;
+commit bitmeden sonuç dönmez. İptal gerekçesi mevcut Sales domain/DB sözleşmesiyle aynı şekilde 1–500 karakterdir ve mevcut cancel + release yetkileri
+birlikte gerekir. Confirm create yetkisi, warehouse authoritative scope ve producer doğrulamaları
+korunur; DB hesabı veya kullanıcı yetkisi yükseltilmez. Açık result sözleşmesi Inventory persistence
+tiplerini dışarı taşımaz; decimal miktar ve özgün recorded timestamp döndürür.
+
+SQL/bağlantı ayrıntıları application hatasına eklenmez. Yetki, bulunamadı, conflict ve unavailable ayrı
+typed hatalardır; iptal tokenı exception'ı değiştirilmez. Commit sırasında bağlantı kaybı sonucu belirsiz
+olabilir: unavailable yanıtı "kesin rollback" anlamına gelmez, aynı operation identity ile tekrar gerekir.
+HTTP status/Problem Details eşlemesi eklendi; runtime ve OpenAPI/istemci üretimi ayrıca doğrulanacaktır.
+DB grant'leri hâlâ kapalıdır. Bu sözleşme sevk/GL, lot/seri veya service item desteği vaat etmez.
+
 ## 17. Fiyat, charge ve ödeme koşulları
+
 
 İskonto, vergi, navlun, paketleme ve diğer charge/allowance; belge veya satır seviyesinde ayrı adjustment kaydıdır. Hesaplama sırası, base amount, yüzde/tutar, vergiye dahil olma ve posting account snapshot edilir. Net tutarı elle yazarak kaynağı kaybetmek yasaktır.
 
