@@ -10,6 +10,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Purchasing\Purchasing.Infrastructure\KaguERP.Modules.Purchasing.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Modules\Inventory\Inventory.Domain\KaguERP.Modules.Inventory.Domain.csproj" />
     <ProjectReference Include="..\..\src\Modules\Inventory\Inventory.Application\KaguERP.Modules.Inventory.Application.csproj" />
     <ProjectReference Include="..\..\src\Modules\Inventory\Inventory.Infrastructure\KaguERP.Modules.Inventory.Infrastructure.csproj" />
@@ -98,6 +99,20 @@
              Link="Database\SalesReservationBatchIntegrationCheck.cs" />
     <Compile Include="..\Integration\SalesStockOrderGatewayIntegrationCheck.cs"
              Link="Database\SalesStockOrderGatewayIntegrationCheck.cs" />
+    <Compile Include="..\Integration\SalesDispatchReservationPreviewIntegrationCheck.cs"
+             Link="Database\SalesDispatchReservationPreviewIntegrationCheck.cs" />
+    <Compile Include="..\Integration\SalesDispatchGatewayIntegrationCheck.cs"
+             Link="Database\SalesDispatchGatewayIntegrationCheck.cs" />
+    <Compile Include="..\Integration\InventoryCostHistoryIntegrationCheck.cs"
+             Link="Database\InventoryCostHistoryIntegrationCheck.cs" />
+    <Compile Include="..\Integration\SupplierInvoiceCostBasisContractCheck.cs"
+             Link="Database\SupplierInvoiceCostBasisContractCheck.cs" />
+    <Compile Include="..\Integration\SupplierInvoiceCaptureIntegrationCheck.cs"
+             Link="Database\SupplierInvoiceCaptureIntegrationCheck.cs" />
+    <Compile Include="..\Integration\InventoryCostPublicationWriterIntegrationCheck.cs"
+             Link="Database\InventoryCostPublicationWriterIntegrationCheck.cs" />
+    <Compile Include="..\Integration\SalesDispatchDraftIntegrationCheck.cs"
+             Link="Database\SalesDispatchDraftIntegrationCheck.cs" />
     <Compile Include="..\Integration\SalesConfirmationReservationIntegrationCheck.cs"
              Link="Database\SalesConfirmationReservationIntegrationCheck.cs" />
     <Compile Include="..\Integration\SalesCancellationReservationIntegrationCheck.cs"

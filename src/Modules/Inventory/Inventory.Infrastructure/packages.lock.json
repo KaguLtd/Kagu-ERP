@@ -47,6 +47,9 @@
       "kaguerp.modules.inventory.domain": {
         "type": "Project"
       },
+      "kaguerp.modules.purchasing.contracts": {
+        "type": "Project"
+      },
       "kaguerp.modules.sales.contracts": {
         "type": "Project"
       }

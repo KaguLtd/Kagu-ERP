@@ -112,7 +112,19 @@
           "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
           "KaguERP.Modules.Inventory.Application": "[1.0.0, )",
           "KaguERP.Modules.Inventory.Domain": "[1.0.0, )",
+          "KaguERP.Modules.Purchasing.Contracts": "[1.0.0, )",
           "KaguERP.Modules.Sales.Contracts": "[1.0.0, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
+      "kaguerp.modules.purchasing.contracts": {
+        "type": "Project"
+      },
+      "kaguerp.modules.purchasing.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Purchasing.Contracts": "[1.0.0, )",
           "Npgsql": "[10.0.3, )"
         }
       },

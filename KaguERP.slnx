@@ -89,6 +89,12 @@
     <Project Path="src/Modules/Treasury/Treasury.Infrastructure/KaguERP.Modules.Treasury.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/tests/" />
+  <Folder Name="/src/Modules/Purchasing/Purchasing.Contracts/">
+    <Project Path="src/Modules/Purchasing/Purchasing.Contracts/KaguERP.Modules.Purchasing.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Purchasing/Purchasing.Infrastructure/">
+    <Project Path="src/Modules/Purchasing/Purchasing.Infrastructure/KaguERP.Modules.Purchasing.Infrastructure.csproj" />
+  </Folder>
   <Folder Name="/tests/Architecture/">
     <Project Path="tests/Architecture/KaguERP.ArchitectureChecks.csproj" />
   </Folder>

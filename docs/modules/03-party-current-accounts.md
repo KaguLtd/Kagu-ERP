@@ -21,6 +21,12 @@ Müşteri, tedarikçi ve diğer iş ortaklarının kimliği, adres/banka bilgile
 
 ## 3. Cari kimlik ve duplicate önleme
 
+`PUR-DRAFT-003` bağımlılığı: Parties-owned `PostgresSupplierAccountCheck`, invoice-view
+permission + tenant/company kapsamında hesabın payable (`balance_side=2`) ve fatura ile
+aynı dövizde olduğunu FOR SHARE altında sınar. Olmayan/başka kapsamdaki/yanlış tür veya
+dövizdeki hesap tek genel hata verir. Bu participant yalnız iç Bootstrap orkestrasyonu
+içindir; audit caller'a aittir. Cari aktiflik ve tarih etkili PartyRole doğrulaması değildir.
+
 - Normalized unvan + sicil/VKN + telefon/e-posta fuzzy aday üretir; otomatik merge etmez.
 - VKN/sicil company/jurisdiction kuralına göre exact unique veya kontrollü exception.
 - Party merge yalnız yetkili, preview ve reference remap planıyla; posted kaynak değişmez, alias/redirect korunur.

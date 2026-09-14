@@ -18,6 +18,34 @@ Kapsam:
 
 ## 2. Temel varlıklar
 
+`PUR-DRAFT-001` / MP-04 maliyet bağımlılığı: `purchasing.invoice_capture` ve normalleştirilmiş
+satırları ilk fatura yakalamasını immutable sürüm 1 olarak saklar. Dış belge numarası/tarihi,
+cari referansı, işlem dövizi, item/UOM, exact miktar ve net tutar taşır. Bu bir taslaktır;
+tedarikçi rolü/cari döviz uygunluğu/aktif master, KDV/kur/matching, dönem veya final fatura
+numarası tekilliği doğrulanmış sayılmaz. Bunlar tamamlanmadan işlem veya maliyet kaynağına
+dönüşmez; `ISupplierInvoiceCostSource` bu capture tablosuna bağlanmamıştır.
+
+İç writer `purchasing.invoice.create` ve exact actor/company kapsamı ister. Aynı capture ID
+advisory lock altında canonical fingerprint ile replay edilir; orijinal kayıt zamanı korunur.
+Header/satırlar ve audit outer transaction'da atomiktir. 0053 FK/deferred toplam-satır sayısı,
+immutable trigger ve forced company RLS içerir; runtime rol SELECT-only kalır. Yeni permission
+atanmaz, HTTP/DI açılmaz. Taslak revizyon/iptal ve finalized invoice source ayrı sonraki işlerdir.
+
+`PUR-DRAFT-002`: İç okuma katmanı `purchasing.invoice.view` ile tek statement snapshot'ından
+başlık/satırları yükler; orijinal yazar kimliğini koruyarak sürüm, toplam, satır sayısı ve
+fingerprint'i doğrular. Başka tenant/company veya olmayan kimlik aynı null sonucu verir;
+eksik/bozuk içerik genel integrity hatasıyla reddedilir. Okuma ve not-found audit'i caller
+transaction içindedir; audit yazılamazsa sonuç dönülmez. Bu doğrulama ticari/mali onay değildir.
+
+`PUR-DRAFT-003`: İç master kontrolü, kayıtlı capture'ı okuyup Parties'in yayımlanmış
+participant'ıyla aynı şirkette payable hesap ve birebir döviz uyumunu; Inventory participant'ıyla
+aktif ürün/şirket ataması, base UOM ve miktar ölçeğini kontrol eder. `purchasing.invoice.view`
+zorunludur; master satırları caller RC transaction süresince FOR SHARE tutulur. Hata, bu
+çağrının okuma audit'ini de savepoint'e geri alır. Geçmiş capture okuması bu güncel kontrollerden
+bağımsız kalır. Cari aktifliği/tarih etkili supplier role mevcut şemada henüz modellenmediği
+için doğrulanmaz. Stock/service/expense ayrımı ve lot/seri receipt uygunluğu bu sınırlı
+kontrolün sonucu değildir; finalize, matching, vergi/kur/dönem ve maliyet kapıları açık kalır.
+
 | Varlık | Önemli alanlar |
 |---|---|
 | `purchase_request` | şirket, şube, talep eden, ihtiyaç tarihi, para birimi, durum |
@@ -80,6 +108,44 @@ Sonuçlar: `matched`, `within_tolerance`, `exception`, `blocked`, `resolved`.
 Yetkiler şirket/şube/depo kapsamıyla ve işlem tutarıyla birlikte değerlendirilir.
 
 ## 6. Muhasebe ve diğer modüllerle bağlantı
+
+### Maliyet girdisi sözleşmesi — `PUR-COST-001`
+
+Inventory tarafındaki INV-COST-008 strict receipt doğrulaması için gelecekteki physical kabul
+writer'ı `purchasing.goods-receipt` source type ve `receipt` posting purpose, exact kabul/line/version
+kimliğini kullanır. Fatura allocation→movement ID/version bağı trusted source tarafından sağlanır.
+Bu isimlendirme yeni ticari/muhasebe politikası veya uygulanmış mal kabulü writer'ı değildir.
+
+`PUR-COST-002`: Source interface artık yalnız `ReconciledSupplierInvoiceCost` döndürür.
+Yayımlanan allocation toplamları aynı query scope/version/cutoff bağlamındaki bağımsız fatura
+satırı bütçelerine miktar ve eligible cost olarak exact eşit olmalıdır. Kabul satırı bazında
+bütün invoice-line kullanımları toplanır ve available base quantity aşılmaz. Kapasite bu faturanın
+kendi allocation'ı hariç önceki kesinleşmiş kullanımlardan sonra kalan miktardır; retry kendi
+kullanımını iki kez düşmez. Eksik/fazla/duplicate kaynak satırı, yanlış item/UOM/depo veya
+uyuşmayan source identity reddedilir. Listeler kopyalanarak salt okunur saklanır.
+
+Bu matematiksel kanıt DB provenance kanıtı değildir: gerçek producer fatura/kabul bakiyelerini
+aynı transaction'da bağımsız authoritative kayıtlardan kilitleyerek okumalıdır. Allocation'lardan
+aynı bütçeleri yeniden türetmek yalnız sentetik fixture'da kullanılır, production'da geçerli
+doğrulama değildir. Receipt capacity tüketimi/idempotency persistence, matching lifecycle ve
+invoice SQL producer henüz yoktur; bu sözleşme bunları tamamlanmış saymaz.
+
+MP-04 maliyet bağımlılığı için dependency-free Purchasing.Contracts açılmıştır; bu MP-05
+satınalma workflow/persistence kabulü değildir. Transaction-bound producer exact tenant/company,
+fatura kimliği/sürümü ve recorded cutoff için kesinleşmiş fatura maliyet snapshot'ı yayımlar.
+Her allocation; fatura satırı, mal kabulü/satırı, item/depo/UOM, base quantity ve doğrulanmış
+eligible functional cost taşır. FX ve cost-rule snapshot kimlikleri zorunludur. Producer,
+allocation toplamlarının gerçek fatura/kabul miktar ve maliyet sınırlarına uyduğunu doğrulamalıdır.
+
+Sözleşme 1–500 immutable allocation, unique kimlik ve invoice-line/receipt-line bağı,
+aynı kaynak satırında tutarlı ürün/UOM/depo, numeric(20,6) miktar ve numeric(20,4) maliyet ister.
+Fatura satırı birden çok kabule bölünebilir; aynı bağlantı yinelenmez. İndirilebilir KDV,
+kur veya masraf uygunluğu Inventory'de tekrar hesaplanmaz. Fatura önce gelmiş fakat ilgili
+mal kabul bağı olmayan veri bu sözleşmeyle stok maliyetine çevrilmez.
+
+Source null/unavailable sonucu "maliyet geçmişi yok" değildir. Purchasing-owned SQL producer,
+fatura lifecycle/matching ve gerçek source authorization henüz uygulanmamıştır; public DI
+veya endpoint açılmaz. Fixture source gerçek fatura doğrulamasının kanıtı değildir.
 
 - Mal kabulü: stok hareketi; şirket politikasına göre geçici kabul hesabı.
 - Tedarikçi faturası: cari borç, indirilecek KDV, stok/gider/sabit kıymet ve kur farkı.

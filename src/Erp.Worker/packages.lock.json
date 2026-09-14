@@ -7,10 +7,16 @@
         "dependencies": {
           "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
           "KaguERP.Modules.Accounting.Infrastructure": "[1.0.0, )",
+          "KaguERP.Modules.Inventory.Application": "[1.0.0, )",
+          "KaguERP.Modules.Inventory.Domain": "[1.0.0, )",
+          "KaguERP.Modules.Inventory.Infrastructure": "[1.0.0, )",
           "KaguERP.Modules.Parties.Infrastructure": "[1.0.0, )",
+          "KaguERP.Modules.Purchasing.Infrastructure": "[1.0.0, )",
           "KaguERP.Modules.Reporting.Application": "[1.0.0, )",
           "KaguERP.Modules.Reporting.Infrastructure": "[1.0.0, )",
           "KaguERP.Modules.Sales.Application": "[1.0.0, )",
+          "KaguERP.Modules.Sales.Contracts": "[1.0.0, )",
+          "KaguERP.Modules.Sales.Domain": "[1.0.0, )",
           "KaguERP.Modules.Sales.Infrastructure": "[1.0.0, )",
           "KaguERP.Modules.Treasury.Application": "[1.0.0, )",
           "KaguERP.Modules.Treasury.Contracts": "[1.0.0, )",
@@ -51,6 +57,27 @@
           "Npgsql": "[10.0.3, )"
         }
       },
+      "kaguerp.modules.inventory.application": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Inventory.Domain": "[1.0.0, )"
+        }
+      },
+      "kaguerp.modules.inventory.domain": {
+        "type": "Project"
+      },
+      "kaguerp.modules.inventory.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Inventory.Application": "[1.0.0, )",
+          "KaguERP.Modules.Inventory.Domain": "[1.0.0, )",
+          "KaguERP.Modules.Purchasing.Contracts": "[1.0.0, )",
+          "KaguERP.Modules.Sales.Contracts": "[1.0.0, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
       "kaguerp.modules.parties.application": {
         "type": "Project",
         "dependencies": {
@@ -71,6 +98,17 @@
           "KaguERP.Modules.Parties.Application": "[1.0.0, )",
           "KaguERP.Modules.Parties.Contracts": "[1.0.0, )",
           "KaguERP.Modules.Parties.Domain": "[1.0.0, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
+      "kaguerp.modules.purchasing.contracts": {
+        "type": "Project"
+      },
+      "kaguerp.modules.purchasing.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "KaguERP.BuildingBlocks.Application": "[1.0.0, )",
+          "KaguERP.Modules.Purchasing.Contracts": "[1.0.0, )",
           "Npgsql": "[10.0.3, )"
         }
       },

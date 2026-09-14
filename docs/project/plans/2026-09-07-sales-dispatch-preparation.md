@@ -21,6 +21,12 @@ Kalıcı sevk veya posted allocation üretmez. API, DB migration, audit olayı, 
 
 ## İlerleme
 
+- 10 Eylül 2026 geniş oturum: [Kalıcı sevk taslağı planı](2026-09-10-sales-dispatch-draft-persistence.md)
+  ile SALES-DSP-004 persistence dilimi eklendi. Artık ilk hazırlık warehouse seçimleriyle immutable
+  draft olarak saklanıp yeniden yüklenebilir; audit/retry/scope sınırları ve DB senaryoları hazırdır.
+  Bu loader'ın confirmed-only sınırı değişmedi. Persisted fulfilment allocation, stok çıkışı,
+  rezervasyon tüketimi ve maliyet/GL hâlâ ayrı tamamlanmamış kapsamdır; draft bu gerçekleri üretmez.
+
 - 7 Eylül 2026 devam: `PostgresSalesDispatchPreparationLoader` ilk sevk için persisted sipariş state/line/timeline yükler. `dispatch.create` ve `sales.order.view` kontrolü sorgudan önce; scope/RLS ve header `FOR SHARE` mevcut Sales loader'ında uygulanır. Exact version, confirmed durum ve hiç fulfilment geçişi olmaması zorunludur. Allocation persistence yokken kısmi sipariş için boş evidence üretilmez. Başarı (10'dan 6 hazırlık, 4 kalan), stale version, yetki reddi ve başka-company not-found senaryoları entegrasyon harness'ine eklendi. Yeni migration/endpoint yok, query kayıt yazmaz; depo/available/GL ve posting yetkisi üretmez. Integration Release build 0 uyarı/0 hata; runtime ve RLS kanıtı MP-04 toplu kapısına ertelendi. Sonraki adım persisted fulfilment allocation ve atomik stok çıkışı bağımlılıklarıdır; bu loader posting açılmadan allocation kaynağına geçirilmelidir. Faz kapısı değişmedi, commit/push yapılmadı.
 
 - 7 Eylül 2026 devam: Application `AuthorizedSalesDispatchPreparation` eklendi. `dispatch.create` ile exact tenant/company kontrolü domain değerlendirmesinden önce yapılır; actor scope'u sonuçta korunur. Yetkisiz rol, yanlış tenant/company ve başarılı kısmi hazırlık senaryoları eklendi. `dotnet build tests/Unit/KaguERP.DomainUnitChecks.csproj -c Release --no-restore -v:q` 0 uyarı/0 hata; runtime güvenlik senaryoları MP-04 toplu kapısında çalıştırılacak. Depo, güncel DB evidence, transaction, audit ve concurrency doğrulaması henüz sağlanmadığından bu nesne kalıcı sevk izni değildir. Yeni endpoint/migration yok; master kapısı değişmedi. Sonraki adım authoritative sevk hazırlık sorgusu için persisted allocation bağımlılığını çözmektir. Commit/push yapılmadı.

@@ -6,6 +6,7 @@
     <ProjectReference Include="..\Inventory.Domain\KaguERP.Modules.Inventory.Domain.csproj" />
     <ProjectReference Include="..\Inventory.Application\KaguERP.Modules.Inventory.Application.csproj" />
     <ProjectReference Include="..\..\Sales\Sales.Contracts\KaguERP.Modules.Sales.Contracts.csproj" />
+    <ProjectReference Include="..\..\Purchasing\Purchasing.Contracts\KaguERP.Modules.Purchasing.Contracts.csproj" />
     <ProjectReference Include="..\..\..\BuildingBlocks\Application\KaguERP.BuildingBlocks.Application.csproj" />
   </ItemGroup>
 </Project>

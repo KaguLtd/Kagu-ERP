@@ -18,7 +18,7 @@ internal static partial class DatabaseIntegrationCheck
         await using var transaction = await connection.BeginTransactionAsync();
         var maker = SalesScope(tenantId, companyId, makerId, "sales.order.create", "sales.order.submit",
             "sales.order.confirm", "sales.order.cancel", AuthorizedInventoryReservationCandidate.RequiredPermission,
-            InventoryReservationReleaseRequest.RequiredPermission);
+            InventoryReservationReleaseRequest.RequiredPermission, "dispatch.create", "sales.order.view");
         var approver = SalesScope(tenantId, companyId, approverId, "sales.order.approve", "sales.order.confirm");
         Guid orderId = Guid.CreateVersion7();
         Guid firstLine = Guid.CreateVersion7(), secondLine = Guid.CreateVersion7();
@@ -55,7 +55,7 @@ internal static partial class DatabaseIntegrationCheck
             VALUES ($1,$2,$6,$3,$4,'EA',1,6,DATE '2026-09-09',clock_timestamp(),$5,1000,'fixture',$6,$6,1,'batch');
             """, connection, transaction))
         {
-            foreach (Guid id in new[] {tenantId, companyId, itemId, warehouseId, makerId, Guid.CreateVersion7()})
+            foreach (Guid id in new[] { tenantId, companyId, itemId, warehouseId, makerId, Guid.CreateVersion7() })
                 seed.Parameters.AddWithValue(id);
             await seed.ExecuteNonQueryAsync();
         }
@@ -93,6 +93,8 @@ internal static partial class DatabaseIntegrationCheck
         Assert(replay[0] == results[1] && replay[1] == results[0], "Reordered batch replay changed original line results.");
         await ThrowsAsync<ArgumentException>(async () =>
             await PostgresSalesOrderReservationBatch.CreateAsync(connection, transaction, [first, first], audit));
+        await AssertSalesDispatchReservationPreviewAsync(connection, transaction, maker, companyId, orderId,
+            itemId, firstLine, secondLine, warehouseId);
         await AssertAtomicSalesCancellationAsync(connection, transaction, maker, companyId, orderId,
             warehouseId, itemId, results.Select(result => result.ReservationId!.Value).ToArray());
         await using (var constraints = new NpgsqlCommand("SET CONSTRAINTS ALL IMMEDIATE", connection, transaction))

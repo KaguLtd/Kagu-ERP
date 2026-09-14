@@ -8,6 +8,10 @@
 
 - `Item`: stock/non-stock/service/expense tipi, base UOM, tax category, tracking policy.
 - `ItemCompany`: Company bazlı aktiflik, muhasebe ve maliyet profili.
+- `PUR-DRAFT-003` için yayımlanmış `PostgresInvoiceItemCheck`: invoice-view permission/company
+  kapsamında 1–500 satırın aktif ürün/şirket ataması, base UOM ve miktar ölçeğini tek sorguda
+  canonical item sırasıyla FOR SHARE kilitleyerek sınar. Yeni stok hareketi, depo yetkisi,
+  lot/seri uygunluğu veya maliyet sonucu üretmez; audit Bootstrap caller'a aittir.
 - `ItemUom`, `Barcode`, `ItemVariant` (faz kontrollü).
 - `Warehouse`, `BinLocation` referansı ORG'den.
 - `StockDocument`: Receipt, issue, transfer, adjustment, count adjustment.
@@ -57,6 +61,20 @@ Her movement source belge/satır, warehouse/bin, quantity/UOM/base quantity, lot
 - Kapanış negatif stok varken bloklanabilir; rapor zorunlu.
 
 ## 6. Rezervasyon
+
+- `INV-RES-015`: Sevk rezervasyon önizlemesi Inventory-owned read contract'tır. Aynı
+  önizlemede aktif stock item, şirket aktivasyonu ve depo ile ürün miktar ölçeği mevcut
+  master loader üzerinden FOR SHARE ile doğrulanır. Lot/seri seçimi henüz desteklenmediği
+  için tracked ürün ilerletilmez. Bu kontrol sıfır rezervasyonlu satırlarda da zorunludur;
+  on-hand yeterlilik şartı değildir ve eksi stok iznini değiştirmez. Aynı
+  sipariş/sürüm/tarih içindeki en fazla 500 benzersiz satır ve toplam 500 rezervasyon başlığı
+  işlenir; fazlası typed limit hatasıdır, kısmi sonuç döndürülmez. Kaynak satırı ve depo
+  ayrı eşleşir; item/UOM uyuşmazlığı veya sevk tarihinden sonraki lifecycle conflict üretir.
+  Tüm demand kilitleri tüm position kilitlerinden önce alınır; aktörün depo kapsamı tekrar
+  kontrol edilir. Dağılım creation recorded time + ID sırasıyla kalan miktarı aşmadan yapılır.
+  Karşılanan + rezervasyonsuz = talep miktarıdır; rezervasyonsuz miktar fiziksel stok açığı
+  demek değildir. Expected version içeren sonuç tüketim izni değildir: lifecycle, stok veya
+  GL yazmaz; gelecekteki kesinleştirme yeniden doğrulamalıdır. Eksi stok politikası değişmez.
 
 - `INV-RES-014`: Source reservation discovery Inventory tablosunun sahibindedir. Trusted
   tenant/company + source type/id ve release permission ile current head'leri döndürür;
@@ -219,7 +237,16 @@ Kesinleşmiş tek adımlı transfer yerinde değiştirilmez. Düzeltme, ters yö
 
 ## 9. Maliyet
 
-MVP yöntemi **hareketli ağırlıklı ortalama**; 10 Eylül 2026 kullanıcı onaylıdır. Şirket/item cost profile bazlı; FIFO Faz 2 kararı olabilir. Eksiye çıkan sevkte son bilinen maliyet kullanılır; maliyet geçmişi olmayan ürün ve sonraki uzlaştırma ayrıntısı açıktır.
+MVP yöntemi **hareketli ağırlıklı ortalama**; 10 Eylül 2026 kullanıcı onaylıdır. Şirket/item cost profile bazlı; FIFO Faz 2 kararı olabilir. Eksiye çıkan sevkte son bilinen maliyet kullanılır.
+
+12 Eylül kullanıcı açıklaması: Maliyet hesapları satınalma faturalarından beslenir. Eksi miktarı
+tamamlayan satınalma kendi yeni maliyetiyle kaydolur; eski sevkin son bilinen maliyet snapshot'ı
+bu yeni alış nedeniyle değiştirilmez. Eksi miktar stok kayıt/sayım hatası olarak takip edilir,
+tek başına işlem engeli değildir. 12 Eylül sonraki kullanıcı onayıyla hiç maliyet geçmişi
+yoksa sıfır maliyet kullanılır; manuel başlangıç maliyeti zorunlu tutulmaz. Sıfırın nedeni
+snapshot'ta korunur; mevcut son maliyet veya veri erişim hatası bu kuralla sıfırlanmaz.
+Miktar sıfırken kalabilecek değer farkının hesap/düzeltme kuralı henüz seçilmedi. Küçük fark
+sessizce silinmez; stok alt defteri ile GL aynı değeri taşımalıdır.
 
 - Receipt cost: base fiyat + dağıtılmış landed cost - iskonto + dahil edilebilir masraf.
 - Issue, posting anındaki mevcut average cost snapshot'ı.
@@ -227,6 +254,111 @@ MVP yöntemi **hareketli ağırlıklı ortalama**; 10 Eylül 2026 kullanıcı on
 - Rounding/variance ayrı hesap ve movement.
 - Stok miktarı ile değer ayrı invariants.
 - Cost görünümü ayrı permission.
+
+`INV-COST-001` domain seçimi: `InventoryCostHistoryEvidence.Known` son maliyet snapshot'ını,
+`NoHistory` başarıyla doğrulanmış geçmiş yokluğu için sıfırı temsil eder. Null evidence veya
+veri erişim hatası sıfır değildir. Çıkış ile evidence tenant/company/item/warehouse/UOM aynı
+olmalı; watermark pozisyonu çıkıştan önce, recorded cutoff çıkış kayıt zamanından geç olmamalı.
+Bilinen sıfır ve geçmişsiz sıfır farklı origin taşır. Snapshot/generation/checksum korunur.
+Bu sınıf maliyet projection'ını sorgulamaz, fatura işlemez, rounded amount veya GL üretmez;
+authoritative history producer, currency/profile doğrulaması ve persistence ayrıca gereklidir.
+
+`INV-COST-002`: `inventory.cost_history_publication` doğrulanmış history sonucunu append-only
+saklar. Exact scope/item/depo/UOM/currency + effective position/generation/recorded cutoff/checksum
+eşleşmesiyle okunur; bulunmayan yayın NoHistory sayılmaz. Ayrı `inventory.cost.view` ve güncel
+aktör depo kapsamı gerekir; kullanıcıya otomatik permission atanmaz. Forced company RLS ve
+runtime SELECT-only uygulanır. Known için snapshot kimliği, NoHistory için null kimlik ve
+0 maliyet zorunludur. Numeric .NET decimal sınırlarında exact saklanır; ticari tutar yuvarlaması
+değildir. Satınalma faturası/valuation publisher henüz yoktur; tabloyu boş görünce sıfır
+yayınlayan fallback yoktur. İç read participant tek başına endpoint değildir; çağıran servis
+başarılı/başarısız işlem audit'ini kendi transaction'ında tamamlamalıdır.
+
+`INV-COST-003`: Bootstrap iç çok satırlı cost preview aynı kaynak/şirketten 1–500 unique
+çıkış hareketini INV-COST-002 okumasına ve INV-COST-001 seçimine bağlar. Scope/cutoff önce
+doğrulanır. Sonuç sırası korunur, koleksiyon salt okunurdur. `inventory.cost.view` ve actor-bound
+audit scope zorunludur. Satır audit kodu known/zero origin'i ayırır; tutar audit'e yazılmaz.
+Sonraki satır veya audit hatası tüm batch'in audit'ini savepoint ile geri alır. Caller commit
+sahibidir; bu servis stok/GL yazmaz ve maliyet yayını oluşturmaz.
+
+`INV-COST-004`: İç publication writer hazırlanmış evidence'ı 0052'ye yazar. `inventory.cost.publish`,
+şirket ve güncel depo kapsamı zorunludur. Aynı publication kimliği transaction advisory lock
+ile serileştirilir. Scope/position/currency/origin/snapshot/cost/checksum/actor exact eşleşen
+retry ilk published_at ile döner; farklı içerik veya farklı kimlikle aynı watermark conflict'tir.
+Persisted depo da yetki kontrolünden geçmeden conflict/replay sonucu verilmez. Bootstrap
+audit savepoint'i yeni kayıt ve audit'i birlikte geri alır. Eski yayın değişmez/silinmez.
+Bu teknik writer fatura-derived evidence'ın doğruluğunu hesaplayan producer değildir;
+upstream fatura doğrulaması ve gerçek/latest snapshot üretimi tamamlanmadan HTTP/DI veya
+runtime INSERT grant'i açılmaz. Kullanıcıya yeni permission otomatik atanmaz.
+
+`INV-COST-005`: Purchasing.Contracts invoice allocation snapshot'ı Inventory maliyet girdisine
+yalnız exact query scope/version/cutoff eşleşmesi ve actor-bound tüm-depo yetkisiyle çevrilir.
+Source dönüşü PUR-COST-002 fatura miktar/değer ve kabul kapasitesi mutabakatından geçmiş
+immutable wrapper olmak zorundadır; ham allocation snapshot'ı source interface'inden dönmez.
+Kaynak invoice/line, receipt/line, allocation, FX/cost-rule, effective/recorded tarih izleri korunur.
+Null source sıfır history değildir. Birim maliyet eligible functional cost / base quantity
+oranından, explicit policy snapshot ID ve scale ile tek AwayFromZero adımında hesaplanır.
+BigInteger exact rational ara hesap kullanır; sessiz ara decimal yuvarlaması olmaz. Sonuç
+decimal'a sığmazsa typed overflow, gerçek sıfır fatura maliyetinde 0 döner. Kaynak tutar/miktar
+sonuçta saklanır; yuvarlanmış birim maliyet × miktar orijinal fatura tutarı yerine kullanılamaz.
+
+Bootstrap iç preview source factory'ye aynı connection/transaction'ı iletir, güncel depo
+kapsamını tekrar doğrular ve tutarsızlık/audit hatasında savepoint'i geri alır. Sonuç invoice
+birim maliyetidir, hareketli ortalama/last-known publication veya GL tutarı değildir. Production
+source ve rounding-policy/currency authority bağlanmadan bu önizleme kullanıcıya açılmaz.
+
+`INV-COST-006`: Domain hesap çekirdeği normal negatif olmayan açılış miktar/değerini aynı
+tenant/company/item/depo/UOM/döviz ve watermark'a bağlar. Yeni toplam değer = açılış değeri +
+faturanın eligible cost tutarı; yeni ortalama = toplam değer / toplam miktardır. Explicit policy
+snapshot ve birim maliyet ölçeği korunur. Invoice cutoff, açılış kesimi ve yeni pozisyon doğrulanır.
+Bu hesap fiziksel receipt veya invoice matching kanıtı değildir; trusted producer bunları ayrıca doğrular.
+Negatif açılış veya sıfır miktardaki artık değerin yeni alışa dağıtımı bu normal hesap yoluna sokulmaz;
+ayrı politika beklenir, bu sınırlama genel eksi stok yasağı değildir.
+
+Çıkış tutarı seçilmiş maliyet × mutlak miktardan exact rational çarpımla tek AwayFromZero adımında
+üretilir; ledger ölçeği explicit 0–4, tutar numeric(20,4) sınırındadır. Çıkış sonucu miktarı eksiye
+indirebilir; kapanış değeri = açılış değeri − çıkış tutarı. Miktar sıfır olsa dahi kalan değer
+sessizce atılmaz. Kaynak history/snapshot, fatura toplamı ve yuvarlama politikası sonuçta kalır.
+Bootstrap `LoadAmountsAsync` mevcut yetkili publication batch okumasına bağlanır; tutar hesabı
+ve audit hatasında iç satır audit'leri de geri alınır. Maliyet/tutarlar audit'e yazılmaz.
+Bu sonuçlar preview'dur; GL, physical stock, period authority veya production policy seçimi değildir.
+
+`INV-COST-007`: İç issue position hazırlayıcısı cost-view/company/actor-depo kapsamından sonra
+tüm hedefleri mevcut canonical position-lock sırasıyla kilitler. Her item/depo/effective-date için
+persisted max sequence ve aynı günün maliyet watermark üst sınırından sonraki sıraları line ID
+sırasıyla atar. Bigint taşması reddedilir. Kayıt zamanı DB clock_timestamp'ten gelir; kaynak kayıt
+zamanı veya maliyet cutoff'u gelecekteyse sonuç verilmez. Bu adaylar kalıcı sequence rezervasyonu
+değildir; kilit bırakıldıktan sonra yeniden kullanılmaz. Tekrar preview aynı sırayı üretebilir.
+Stock writer aynı transaction'da persist etmeli ve unique position constraint'i korumalıdır.
+Backdate/dönem izni veya maliyet publication güncellik kanıtı oluşturulmaz.
+
+`INV-COST-008`: İç invoice receipt verifier explicit allocation→stock movement ID/receipt-version
+bağlantısını Inventory-owned persisted receipt ile eşleştirir. Cost-publish/company/actor-depo
+kapsamı, `purchasing.goods-receipt`/`receipt` source type/purpose, kind Receipt, source receipt/line,
+version, item/depo/UOM ve recorded cutoff zorunludur. Aynı harekete bağlanan miktarlar topluca
+kontrol edilir. Tersleme hareketi veya cutoff içinde terslenmiş receipt kabul edilmez. Sonuç
+receipt'in gerçek effective/recorded tarihlerini korur; dönem/backdate izni veya GL sonucu değildir.
+Başka faturaların tükettiği kapasiteyi bu okuyucu hesaplamaz; PUR-COST-002 ve gelecekteki atomik
+consumption writer bunun sahibidir. Bootstrap verified preview kaynak/audit hatasında tüm iç
+invoice audit'ini geri alır. Eski input-only preview gerçek receipt doğrulaması sayılmaz.
+Çok kabullü fatura için bütün movement/reversal kanıtları tek bounded SELECT statement snapshot'ında
+okunur (en çok 500 ID); receipt başına ayrı sorguyla farklı committed durumlar karıştırılmaz.
+Sonuç allocation kaynak sırasındadır. Bu read-only tutarlılık, ilerideki write/consume kilidinin
+veya source kapasite yarışlarını önleyen transaction protokolünün yerine geçmez.
+
+`INV-COST-009`: Toplu issue amount sonucu 1–500 unique movement/source line/valuation position
+taşır. Tenant/company/source type/event/version/purpose, effective date, currency ve rounding
+policy/scale ortak olmalıdır. Her public amount record'u exact hesapla yeniden karşılaştırılır;
+değiştirilmiş tutar kabul edilmez. Belge toplamı numeric(20,4), ürün/depo signed miktar toplamı
+numeric(20,6) sınırında kalır. Satırlar ve pozisyon toplamları salt okunur; her satırın ayrı
+history snapshot/origin'i korunur, farklı kesitler aynı maliyetmiş gibi birleştirilmez.
+Bootstrap tutar preview'ı bu doğrulamayı son audit'ten önce yapar; toplam taşmasında önceki
+selection audit'leri de geri alınır. Bu kontrol GL posting veya bakiye source authority değildir.
+Batch `Fingerprint` alanı `inventory-issue-cost-batch/v1` canonical JSON üzerinden SHA-256'dır.
+Movement ID sırası, invariant G29 ondalık ve sabit tarih biçimleri kullanılır; input sırası/kültür/
+trailing zero sonucu değiştirmez. Kaynak, hareket, effective/recorded zaman, policy/scale ve
+history snapshot/generation/cutoff/checksum/origin kapsanır. Yeni movement ID veya kayıt zamanı
+yeni özettir; bu değer kullanıcı request idempotency anahtarı, dijital imza veya DB provenance
+kanıtı değildir. Format/alan kapsamı değişirse fingerprint format sürümü değiştirilmelidir.
 
 ## 10. Sayım
 

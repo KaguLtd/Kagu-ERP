@@ -13,8 +13,8 @@
 | İş paketi | Mevcut durum | Kapanışta eksik |
 |---|---|---|
 | Sipariş lifecycle ve miktar rezervasyonu | Domain, SQL/writer, atomic confirm/cancel/release, receipt ve HTTP routing kodları var | MP-04 runtime/DB/concurrency/authorization kanıtı; gerçek gateway ve sınırlı grant henüz kapalı |
-| Sevk | Read-only hazırlık ve miktar evidence contract'ı var | Persisted dispatch/allocation, reservation consume, stok çıkışı, maliyet/GL bağlantısı ve kısmi sevk |
-| Stok değerleme ve dönem etkisi | Generic movement/impact-preview temeli var | DEC-011, değerleme writer'ı, backdate/repost ve cut-off doğrulaması |
+| Sevk | Read-only hazırlık, miktar evidence ve 0051 immutable draft persistence kodu var; runtime bekliyor | Posted dispatch/allocation, reservation consume, stok çıkışı, maliyet/GL bağlantısı ve kısmi sevk |
+| Stok değerleme ve dönem etkisi | Miktar/impact-preview; last-known/zero history publication; exact invoice unit cost/normal MWA/issue amount; kaynak mutabakatı ve receipt doğrulaması; toplu maliyet/fingerprint kodları var, runtime bekliyor | Gerçek invoice source producer, authoritative opening balance ve maliyet publication producer, değerleme writer'ı, kalan DEC-011/backdate/repost ve cut-off kanıtı |
 | Satış faturası | Şartname sözleşmesi var; Sales kod envanterinde uygulama yok | Fiyat/vergi snapshot, source-line bağları, cari açık kalem ve gelir/KDV posting'i |
 | İade | Şartname sözleşmesi var; Sales kod envanterinde uygulama yok | Orijinale bağlı miktar, stok disposition ve cari/GL/vergi karşı kayıtları |
 | Web operasyon akışı ve rapor | Bu stok/satış zincirinin tamamlandığına dair kanıt yok | Sipariş→sevk→fatura→iade kullanımı, exception ve drill-down |
@@ -23,6 +23,14 @@
 MP-04 completed değildir. Yalnız derleme ve yeni dosya sayısıyla bir tamamlanma yüzdesi üretilmez.
 MP-03 teknik temel kullanılabilir fakat kullanıcı golden UAT kabulü ayrıca açıktır.
 
+14 Eylül durum netleştirmesi: Purchasing Contracts ve Infrastructure capture writer katmanları
+mevcut; 0053 ilk fatura taslağı persistence migration'ı yazıldı fakat henüz uygulanmadı.
+Finalized invoice lifecycle veya gerçek SQL cost producer yoktur. Son oturumlardaki doğrulama,
+mutabakat, readonly preview ve fingerprint çalışmaları bu eksikliği kapatmış sayılmaz. Sonraki
+esas uygulama paketi bağımsız fatura/kabul kaynak kayıtları ve atomik kapasite kullanımından
+başlayıp authoritative maliyet yayınına, ardından posted dispatch/consume/stock/GL transaction'ına
+ilerlemelidir. Yeni küçük doğrulama sayıları MP-04 bitiş yüzdesi veya kapanış kanıtı değildir.
+
 ## Kullanıcı kararı bekleyen dar paket — DEC-MP01-011
 
 **10 Eylül güncellemesi:** Kullanıcı aşağıdaki ilk taslağın 1. maddesini kabul etti, 2–4'ü değiştirdi:
@@ -30,7 +38,8 @@ hareketli ortalama onaylı; eksi stok miktarı serbest; kesinleşmiş düzeltme 
 sayım farkı fişini yönetici veya yetkili kullanıcı işleyebilir. Güncel karar kaydı ve Inventory modülü
 güncellendi. Aşağıdaki liste tarihsel taslaktır, özellikle eksi stok yasağı ve zorunlu ikinci onay
 artık uygulanacak politika değildir. Sonraki kullanıcı cevabıyla eksiye çıkan sevkte son bilinen
-maliyetin kullanılması da onaylandı; hiç maliyet geçmişi olmayan ürün ve sonraki uzlaştırma ayrıntısı açık kalır.
+maliyetin kullanılması da onaylandı. 12 Eylül sonraki kararla hiç maliyet geçmişi olmayan
+ürünün çıkışı sıfır maliyetle ilerler; manuel başlangıç maliyeti zorunlu değildir.
 
 Aşağıdakiler yalnız onaya sunulan taslaktır; uygulanmış/onaylanmış politika değildir:
 
@@ -51,6 +60,13 @@ politikasını kapatmak, alternatif loader ile aşmak veya eski OpenAPI'den SDK 
 Politikayı yöneten yetkili kişiyle güvenilir geliştirme/derleme yolu belirlenmesi gerekiyor.
 
 ## Uygulama sırası ve done when
+
+12 Eylül karar eki: Satınalma faturası maliyet kaynağıdır; eksiye düşen çıkış son bilinen
+maliyetini korur, sonraki alış yeni kendi maliyetiyle işlenir. DEC-011 ve Inventory sözleşmesi
+güncellendi. Sonraki cevapla hiç maliyet geçmişi olmayan ürün için sıfır maliyet onaylandı;
+bu başlangıç kararı artık açık değildir. Kalan değer farkının muhasebe hesabı hâlâ açıktır;
+yeni alış için eski sevki otomatik yeniden fiyatlama uygulanmayacaktır.
+Bu karar kaydında kod/DB değiştirilmedi; belge değişikliği nedeniyle test çalıştırılmadı.
 
 1. DEC-011 kararını yazılı kaydet; aynı zamanda doğrulama ortamının politika engelini yetkili yoldan çöz.
 2. Kalıcı sevk/allocation/consume ve miktar+değer+GL zincirini aynı transaction sözleşmesiyle tamamla.

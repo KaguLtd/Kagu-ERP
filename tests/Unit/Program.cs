@@ -103,11 +103,18 @@ var checks = new (string Name, Action Run)[]
     ("INV-RES-001 reservation demand and quantity lifecycle", InventoryDomainChecks.ReservationLifecyclePreservesDemandAndQuantity),
     ("INV-RES-004 partial reservation capacity", InventoryDomainChecks.PartialReservationPreservesDemand),
     ("INV-CNT-001 negative book count difference", InventoryCountDifferenceChecks.CountDifferencePreservesNegativeBookBalance),
+    ("INV-RES-015 dispatch reservation distribution", InventoryDispatchReservationPlanChecks.DistributionConservesQuantity),
+    ("INV-COST-001 last known or explicit zero issue cost", InventoryIssueCostChecks.LastKnownOrExplicitZero),
+    ("INV-COST-005 exact invoice unit cost", InventoryInvoiceCostBasisChecks.ExactInvoiceUnitCost),
+    ("INV-COST-006 valuation quantity and value", InventoryValuationCalculationChecks.QuantityAndValueConservation),
+    ("INV-COST-009 batch totals and provenance", InventoryIssueCostBatchChecks.TotalsAndProvenance),
     ("INV-RES-002 reservation permission and warehouse scope", InventoryDomainChecks.ReservationAuthorizationRequiresWarehouseScope),
     ("SALES-ORD-001/FUL-001 versioned order and fulfilment evidence", SalesDomainChecks.OrderLifecycleIsAppendOnlyAndVersioned),
     ("SALES-DSP-001 dispatch preparation remaining quantity", SalesDomainChecks.DispatchPreparationPreservesRemainingQuantity),
     ("SALES-ORD-002 command authorization and persistence boundary", SalesDomainChecks.OrderCommandsEnforcePermissionAndPersistenceBoundary),
     ("SALES-RES-005 stock-order immutable application selections", SalesDomainChecks.StockOrderCommandsSnapshotAndValidateSelections),
+    ("SALES-DSP-004 immutable dispatch draft selection", SalesDispatchDraftChecks.DraftSelectionIsImmutableAndCanonical),
+    ("SALES-DSP-006 scoped dispatch query", SalesDispatchQueryChecks.QueryRequiresScopeAndBothPermissions),
 };
 
 static void ReconciliationTransitJournalsAreExact()

@@ -122,6 +122,50 @@ Durum:
 
 ## 6. Sevk
 
+- `SALES-DSP-009`: İç rounding preview, cost-view/dispatch-create/order-view ve exact audit scope
+  kontrolünden sonra Accounting-owned immutable policy ID/expected-version kaydını okur. İki
+  basamak AwayFromZero dışındaki politika, yanlış şirket, eksik kayıt veya farklı sürüm reddedilir.
+  Allocated cost preview'a scale DB'den aktarılır; dönüş tam policy snapshot/version ile birlikte
+  kaynak satır maliyetlerini taşır. Şirketin aktif/effective policy atamasını seçmez; bu modelde
+  böyle bir atama henüz yoktur. Fonksiyonel currency authority ve gerçek invoice producer ayrıca
+  gereklidir. Yeni endpoint/grant veya GL kaydı yok; audit geri alımı aynı transaction'dadır.
+
+- `SALES-DSP-008` sunucu pozisyon eki: `LoadAllocatedAsync` önce kalıcı draft ve rezervasyon
+  demand/position kilitlerini alır, sonra Inventory-owned hazırlayıcıyla movement sequence ve DB
+  recorded-time üretir. Exact draft item/depo eşleşmesi ek kilit alınmadan kontrol edilir. Kaynak
+  bağlamı artık bu iki değeri taşımaz; currency/rounding authority ve history producer hâlâ ayrıca
+  gereklidir. Mevcut explicit-sequence iç preview geriye uyumluluk için kalır. Yeni yol da
+  draft/reservation/amount audit'lerini aynı outer savepoint'te geri alır; stok yazmaz.
+
+- `SALES-DSP-008`: İç Bootstrap maliyet önizlemesi immutable sevk taslağını mevcut sipariş ve
+  rezervasyon kontrolünden geçirir; draft'taki exact ürün/depo/UOM/miktar/tarihten negatif issue
+  adayı üretir. Her order-line için tek explicit movement ID/sequence/watermark bağlamı gerekir;
+  eksik/fazla/duplicate satır veya stok pozisyonu reddedilir. Kaynak `sales.dispatch`, event
+  `dispatch_id`, line `order_line_id`, immutable draft source version `1`, purpose `issue` olur.
+  OrderVersion kaynak taslakta ayrıca korunur; issue sürümüyle karıştırılmaz.
+  Bir batch tek fonksiyonel döviz taşır. Caller-supplied policy/sequence henüz authoritative
+  production profile/allocator değildir; bu iç servis HTTP/DI yoluna açılmaz.
+  `inventory.cost.view` ile mevcut dispatch/depo yetkileri birlikte gerekir. Published maliyet
+  bulunamazsa sıfır kabul edilmez. Maliyet tutarları ve rezervasyon preview aynı transaction'da
+  döner; eşleme/maliyet/audit hatası önceki iç audit'leri de geri alır. Stock/consume/GL yazılmaz.
+
+- `SALES-DSP-004`: İlk sevk hazırlığı immutable bir draft snapshot olarak saklanabilir. `dispatch.create`
+  ve `sales.order.view` permission'ları, exact company ve seçilen tüm depoların authoritative actor scope'u
+  gerekir. Taslak 1–500 unique sipariş satırı, her satır için tek depo ve pozitif exact miktar taşır;
+  item/base-UOM persisted siparişten kopyalanır. `dispatch_id` request key'dir; tenant/company/key
+  kilidi altında canonical actor/order/version/date/line fingerprint karşılaştırılır. Satır sırası ve
+  decimal trailing zero değişikliği aynı istektir; farklı içerik conflict'tir. Retry eski snapshot/time'ı
+  döndürür, source sonradan değişmiş olsa da tarihi taslağı yeniden üretmez; güncel depo yetkisi yine aranır.
+  Yeni draft ise güncel sipariş durumunu/sürümünü tekrar doğrular. Başka depodaki persisted draft için
+  conflict sonucu verilmeden önce o draft'ın depo kapsamı da kontrol edilir.
+  `0051` header/line tamlığı deferred constraint, source/order/depo FK'leri, immutable guard ve forced
+  RLS taşır. Runtime SELECT-only; yazım ve audit aynı caller-owned transaction/savepoint'te kalır.
+  Taslak load mevcut create+order-view yetkisiyle sınırlı iç yoldur; bağımsız view permission/grant veya
+  public endpoint henüz açılmadı. Tarihi draft snapshot'ı düzenleme/revision lifecycle'ı sonraki kapsamdır.
+  **Taslak stok ayırmaz, siparişi sevk edilmiş yapmaz, irsaliye veya GL üretmez.** Birden çok draft aynı
+  miktarı hazırlayabilir; stok, aktif master, reservation consume ve persisted allocation kesinleştirmede
+  tekrar doğrulanacaktır. Eksi stok/maliyet kullanıcı kararları bu taslak nedeniyle değiştirilmez.
+
 - `SALES-DSP-003`: İlk sevk hazırlama sorgusu `dispatch.create` ve `sales.order.view` izinleriyle
   caller transaction içinde scope filtreli sipariş loader'ını kullanır. Header `FOR SHARE` kilidi,
   exact expected version ve timeline tutarlılığı korunur. Şimdilik yalnız confirmed ve geçmişinde
@@ -297,6 +341,38 @@ typed hatalardır; iptal tokenı exception'ı değiştirilmez. Commit sırasınd
 olabilir: unavailable yanıtı "kesin rollback" anlamına gelmez, aynı operation identity ile tekrar gerekir.
 HTTP status/Problem Details eşlemesi eklendi; runtime ve OpenAPI/istemci üretimi ayrıca doğrulanacaktır.
 DB grant'leri hâlâ kapalıdır. Bu sözleşme sevk/GL, lot/seri veya service item desteği vaat etmez.
+
+### Sevk rezervasyon önizlemesi — `SALES-DSP-005`
+
+Kalıcı taslağın tarihsel okunabilmesi, güncel siparişten sevk edilebildiği anlamına gelmez.
+Pasif ürün/şirket aktivasyonu/depo tarihsel taslağı gizlemez; yeni operasyonel önizlemeyi
+reddeder. Miktar ölçeği ve desteklenen tracking türü güncel stok kartından doğrulanır.
+İç Bootstrap hazırlığı taslağı okuduktan sonra mevcut sipariş sürümünü ve sevk edilebilir
+miktarı yeniden doğrular; ardından Inventory'nin `INV-RES-015` sözleşmesiyle her satırın
+rezervasyon dağılımını alır. `dispatch.create` + `sales.order.view`, şirket ve depo kapsamı
+zorunludur. Başarısız hazırlıkta kısmi read audit savepoint ile geri alınır; başarılı
+`dispatch.reservation.preview` audit'i caller transaction'ındadır. Bu yol public endpoint,
+rezervasyon tüketimi, fulfillment, stok çıkışı veya muhasebeleştirme değildir. İlk sevk
+hazırlığının mevcut sınırları korunur; kısmi sevk sonrası akış henüz açılmamıştır.
+
+### Sevk taslağı uygulama servisi — `SALES-DSP-006`
+
+`ISalesDispatchDraftGateway` create/load/preview ve birleşik prepare işlemlerini tanımlar.
+Bootstrap uygulaması yalnız verilen data source ile çalışır; owner bağlantısına fallback
+yapmaz, yetki yükseltmez. Her işlem ReadCommitted transaction ve audit commit'i bitmeden
+sonuç döndürmez. Sales sözleşmesi Inventory persistence tiplerini taşımadan exact decimal
+miktarları ve expected reservation version'ları yayımlar; sonuç koleksiyonları salt okunurdur.
+
+`PrepareAsync` taslak create/replay ve güncel sipariş/stok/rezervasyon önizlemesini aynı
+transaction'a alır. Yeni taslakta önizleme hatası tüm taslak ve audit'i geri alır. Var olan
+taslakta güncel doğrulama başarısız olsa da orijinal taslak silinmez/değişmez. Tarihsel
+`CreateAsync` replay'i geçmiş sonucu döndürürken `PrepareAsync` her çağrıda güncel durumu
+tekrar denetler; önizleme ilk çağrıdaki miktar dağılımını sonsuza dek sabitlemez.
+
+SQL ayrıntısı/inner exception dışarı çıkmaz; izin, bulunamadı, conflict ve servis erişimi
+ayrıdır. Cancellation özgün kalır. Commit sırasında bağlantı kaybı belirsiz olabilir;
+aynı draft ID ve içerikle tekrar gerekir. Bu servis stok çıkışı/consume/GL veya kesinleşmiş
+sevk üretmez. Runtime grant ve HTTP/DI açılışı MP-04 kanıtı bekler; yeni endpoint yoktur.
 
 ## 17. Fiyat, charge ve ödeme koşulları
 

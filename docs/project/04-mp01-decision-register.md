@@ -82,9 +82,20 @@ miktarın rezervasyon olarak yaratılmaması, kısmi rezervasyon ve expiry/relea
   UPDATE/DELETE veya geçmişi silme aracı yapılmaz. Bu yorum kullanıcıya açıkça bildirildi.
 - **Son maliyet onayı:** Kullanıcı sonraki cevabında "Maliyet son bilinen maliyeti kullanarak olacak"
   dedi. Eksiye çıkan stok sevkinde son bilinen maliyet kullanılacaktır; bu tercih artık açık değildir.
-- **Hâlâ açık:** Hiç bilinen maliyeti olmayan ürünün başlangıç maliyeti ve sonraki girişle farkın
-  uzlaştırılma ayrıntısı. Son maliyet onayı sıfır maliyet veya sessiz geçmiş GL değişikliği onayı değildir.
-  Açık/kapalı dönem backdate/reopen ayrıntısı önceki cevaptan türetilmez.
+- **12 Eylül ek kararı:** Kullanıcı eksiye düşen çıkışın son maliyet kaydıyla kalacağını,
+  eksi miktarı tamamlayan satınalmaların kendi yeni maliyetleriyle kaydolacağını ve maliyet
+  hesaplarının satınalma faturalarından besleneceğini belirtti. Yeni alış faturası eski sevkin
+  maliyet snapshot'ını geriye dönük değiştirmez. Eksi miktar kullanıcı açısından stok kayıt/sayım
+  hatasıdır; tek başına operasyonu engellemez. Bu açıklama normal pozitif stok için mevcut
+  hareketli ortalama kararını açıkça değiştirmediğinden o karar korunur.
+- **12 Eylül başlangıç maliyeti onayı:** Kullanıcı "hayır zorunluluk olmasın, maliyeti 0 al geç"
+  dedi. Hiç maliyet geçmişi yoksa çıkış sıfır birim maliyetle ilerler; manuel başlangıç maliyeti
+  girişi zorunlu değildir. Bu durum maliyet kaynağı/snapshot'ında açıkça ayrılır. Var olan son
+  maliyet sıfırlanmaz; DB erişim hatası veya bozuk maliyet verisi geçmiş yokmuş gibi ele alınmaz.
+- **Hâlâ açık:** Miktar sıfıra
+  geldiğinde kalabilecek stok değer farkının muhasebe hesabı/düzeltme kuralı. Küçük farkların
+  operasyonu engellememesi, farkı sessiz silme veya defter–GL uzlaşmazlığına izin değildir.
+  Açık/kapalı dönem backdate/reopen ayrıntısı bu cevaptan türetilmez.
 - **Sınır:** Yetkilendirme, depo/company scope, audit, immutable geçmiş ve sayım snapshot/cutoff
   korunur. Mevcut rezervasyon/bloke koruması, eksi stok adına körlemesine kaldırılmaz; negatif stok
   yazma davranışı tüm ilgili writer'larda tutarlı tasarlanıp MP-04 kapısında doğrulanacaktır.

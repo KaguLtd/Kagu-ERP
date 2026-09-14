@@ -1,5 +1,12 @@
 # Muhasebe ve Büyük Defter Modülü
 
+13 Eylül MP-04 iç contract eki: `PostgresRoundingPolicySnapshotLoader` mevcut immutable
+rounding_policy_snapshot kaydını exact tenant/company/policy ID/expected-version ile okur.
+Bu modül-owned reader çağıran use case'in permission/audit sorumluluğunu devralmaz; public
+endpoint değildir. Kaynak tabloya başka modül doğrudan erişmez. Snapshot'ın varlığı aktif
+şirket politikası/effective-date ataması veya maliyet yöntemi onayı anlamına gelmez. Sevk
+composition iki basamak AwayFromZero kararını ayrıca kontrol eder ve version'ı sonucunda korur.
+
 ## 1. Amaç
 
 Tüm alt defterlerden gelen mali olayları çift taraflı kayıt düzeninde, KKTC Tekdüzen Hesap Planı ile eşlenebilir, dönemsel ve denetlenebilir biçimde büyük deftere taşır. Muhasebe motoru hesap numaralarını iş koduna gömmez; sürümlü kayıt kuralları kullanır.

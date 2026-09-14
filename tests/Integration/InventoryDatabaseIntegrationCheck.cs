@@ -21,7 +21,7 @@ internal static partial class DatabaseIntegrationCheck
                 InventoryReservationReleaseRequest.RequiredPermission])]);
         var request = new InventoryReservationRequest(scope, companyId, Guid.CreateVersion7(), warehouseId,
             InventoryDemandSourceIdentity.Create("sales.order", Guid.CreateVersion7(), Guid.CreateVersion7(), 4),
-            InventoryQuantity.Create(10m), new DateOnly(2026,9,8));
+            InventoryQuantity.Create(10m), new DateOnly(2026, 9, 8));
         await using (var seed = new NpgsqlCommand("""
             INSERT INTO inventory.reservation_creation
                 (tenant_id,company_id,warehouse_id,recorded_by,item_id,request_id,reservation_id,
@@ -61,17 +61,17 @@ internal static partial class DatabaseIntegrationCheck
             insert.Parameters.AddWithValue(actorId);
             await insert.ExecuteNonQueryAsync();
         }
-        await InsertEvent(2,1,6m,6m,4m);
+        await InsertEvent(2, 1, 6m, 6m, 4m);
         await transaction.SaveAsync("excess_consumption");
-        var excessive = await ThrowsAsync<PostgresException>(() => InsertEvent(3,1,5m,11m,0m));
+        var excessive = await ThrowsAsync<PostgresException>(() => InsertEvent(3, 1, 5m, 11m, 0m));
         Assert(excessive.SqlState == "23514", "Reservation cannot consume beyond its remaining quantity.");
         await transaction.RollbackAsync("excess_consumption");
         await AssertReservationReleaseWriterAsync(connection, transaction, scope, companyId, warehouseId,
             reservationId, request.EffectiveDate);
-        var demand = InventoryReservationDemandEvidence.Create(tenantId,companyId,request.Source,
-            itemId,InventoryUomCode.Create("EA"),InventoryQuantity.Create(10m));
-        await PostgresInventoryReservationRequestGate.AcquireAsync(connection,transaction,request);
-        var balance = await PostgresInventoryReservationBalanceLoader.LoadAsync(connection,transaction,request,demand);
+        var demand = InventoryReservationDemandEvidence.Create(tenantId, companyId, request.Source,
+            itemId, InventoryUomCode.Create("EA"), InventoryQuantity.Create(10m));
+        await PostgresInventoryReservationRequestGate.AcquireAsync(connection, transaction, request);
+        var balance = await PostgresInventoryReservationBalanceLoader.LoadAsync(connection, transaction, request, demand);
         Assert(balance.ActiveReservedAtPosition == 0m && balance.CommittedQuantityForDemand == 6m,
             "Release must clear active reservation while retaining the six consumed units of demand.");
         Guid blockId = Guid.CreateVersion7();
@@ -95,14 +95,14 @@ internal static partial class DatabaseIntegrationCheck
             command.Parameters.AddWithValue(Guid.CreateVersion7());
             await command.ExecuteNonQueryAsync();
         }
-        await BlockEvent(1,3m,request.EffectiveDate);
-        await BlockEvent(2,2m,request.EffectiveDate);
+        await BlockEvent(1, 3m, request.EffectiveDate);
+        await BlockEvent(2, 2m, request.EffectiveDate);
         await transaction.SaveAsync("block_increase");
-        var increase = await ThrowsAsync<PostgresException>(() => BlockEvent(3,3m,request.EffectiveDate));
+        var increase = await ThrowsAsync<PostgresException>(() => BlockEvent(3, 3m, request.EffectiveDate));
         Assert(increase.SqlState == "23514", "A block release cannot increase blocked quantity.");
         await transaction.RollbackAsync("block_increase");
-        await BlockEvent(3,0m,request.EffectiveDate.AddDays(1));
-        balance = await PostgresInventoryReservationBalanceLoader.LoadAsync(connection,transaction,request,demand);
+        await BlockEvent(3, 0m, request.EffectiveDate.AddDays(1));
+        balance = await PostgresInventoryReservationBalanceLoader.LoadAsync(connection, transaction, request, demand);
         Assert(balance.BlockedAtPosition == 2m,
             "Blocked balance must use the last effective version, not sum history or apply a future release.");
         var position = new InventoryPositionLockTarget(itemId, warehouseId, InventoryUomCode.Create("EA"));
@@ -113,7 +113,7 @@ internal static partial class DatabaseIntegrationCheck
         Assert(capacityBeforeRelease.MinimumAvailable == -2m && capacityBeforeRelease.HasProtectedDeficit &&
                capacityAfterRelease.MinimumAvailable == 0m && !capacityAfterRelease.HasProtectedDeficit,
             "Capacity must respect effective block release and must not retain released reservation creation quantities.");
-        var terminal = await ThrowsAsync<PostgresException>(() => InsertEvent(4,1,1m,7m,0m));
+        var terminal = await ThrowsAsync<PostgresException>(() => InsertEvent(4, 1, 1m, 7m, 0m));
         Assert(terminal.SqlState == "23514", "Released reservation cannot consume again.");
         await transaction.RollbackAsync();
     }
@@ -410,7 +410,7 @@ internal static partial class DatabaseIntegrationCheck
         await AssertReservationRequestGateAsync(migratorDataSource, appDataSource,
             tenantId, companyId, sourceWarehouseId, actorId, itemId);
         await AssertReservationLifecyclePersistenceAsync(migratorDataSource,
-            tenantId,companyId,sourceWarehouseId,actorId,itemId);
+            tenantId, companyId, sourceWarehouseId, actorId, itemId);
         await AssertReservationWriterAsync(migratorDataSource, tenantId, companyId,
             sourceWarehouseId, destinationWarehouseId, actorId, itemId);
         AuthorizedImmediateStockTransferCandidate candidate;

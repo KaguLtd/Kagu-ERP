@@ -236,6 +236,8 @@ internal static partial class DatabaseIntegrationCheck
             orderId, commitment.Lines[0].OrderLineId);
         await AssertSalesReservationBatchAsync(ownerDataSource, tenantId, companyId, makerId, approverId, itemId);
         await AssertSalesStockOrderGatewayAsync(ownerDataSource, appDataSource, tenantId, companyId, makerId, approverId, itemId);
+        await AssertSalesDispatchDraftAsync(ownerDataSource, appDataSource, tenantId, companyId, otherCompanyId,
+            makerId, orderId, commitment.Lines[0].OrderLineId);
     }
 
     private static ExecutionScope SalesScope(

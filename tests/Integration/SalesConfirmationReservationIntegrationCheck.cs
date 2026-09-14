@@ -32,7 +32,7 @@ internal static partial class DatabaseIntegrationCheck
             VALUES ($1,$2,$6,$3,$4,'EA',1,3,DATE '2026-09-09',clock_timestamp(),$5,999,'fixture',$6,$6,1,'confirm');
             """, connection, transaction))
         {
-            foreach (Guid id in new[] {scope.TenantId, companyId, itemId, warehouseId, scope.ActorId, Guid.CreateVersion7()})
+            foreach (Guid id in new[] { scope.TenantId, companyId, itemId, warehouseId, scope.ActorId, Guid.CreateVersion7() })
                 seed.Parameters.AddWithValue(id);
             await seed.ExecuteNonQueryAsync();
         }
